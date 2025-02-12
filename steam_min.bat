@@ -1,4 +1,4 @@
-@(set ^ "0=%~f0" -des ') & powershell -version 2.0 -nop -c iex(out-string -i (gc -lit $env:0)) & exit /b ');.{
+@(set ^ "0=%~f0" -des ') & powershell -nop -c iex(out-string -i (gc -lit $env:0)) & exit /b ');.{
 
 " Steam_min : always starts in SmallMode with reduced ram usage when idle - AveYo, 2025.02.12 v2 " 
 
@@ -6,8 +6,8 @@ $QUICK = '-silent -quicklogin -vgui -oldtraymenu -nofriendsui -no-dwrite -vrdisa
          '-cef-force-browser-underlay -cef-delaypageload -cef-force-occlusion -cef-disable-gpu -cef-single-process'
 
 $STEAM = resolve-path (gp "HKCU:\SOFTWARE\Valve\Steam" SteamPath -ea 0).SteamPath
-pushd "$STEAM\userdata"
-$CLOUD = split-path (dir -filter "localconfig.vdf" -Recurse | sort LastWriteTime -Descending | Select -First 1).DirectoryName
+#pushd "$STEAM\userdata"
+#$CLOUD = split-path (dir -filter "localconfig.vdf" -Recurse | sort LastWriteTime -Descending | Select -First 1).DirectoryName
 
 function sc-nonew($fn,$txt) {
   if ((Get-Command set-content).Parameters['nonewline'] -ne $null) { set-content $fn $txt -nonewline -force }
