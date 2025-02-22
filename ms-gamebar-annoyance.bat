@@ -1,4 +1,4 @@
-@(set ^ "0=%~f0" -des ') &set 1=%*& powershell -version 2.0 -nop -c iex(out-string -i (gc -lit $env:0)) & exit /b ')
+@(set ^ "0=%~f0" -des ') &set 1=%*& powershell -nop -c iex(out-string -i (gc -lit $env:0)) & exit /b ')
 # AveYo: fix annoyance after uninstalling Xbox, AveYo 2024.12.28
 
 $id = 'ms-gamebar-annoyance'
