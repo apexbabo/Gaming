@@ -1,6 +1,6 @@
 @(set ^ "0=%~f0" -des ') & powershell -nop -c iex(out-string -i (gc -lit $env:0)) & exit /b ');.{
 
-" Steam_min : always starts in SmallMode with reduced ram usage when idle - AveYo, 2025.02.12 v2 " 
+" Steam_min : always starts in SmallMode with reduced ram usage when idle - AveYo, 2025.03.04 " 
 
 $QUICK = '-silent -quicklogin -vgui -oldtraymenu -nofriendsui -no-dwrite -vrdisable -forceservice -console ' + 
          '-cef-force-browser-underlay -cef-delaypageload -cef-force-occlusion -cef-disable-gpu -cef-single-process'
@@ -8,6 +8,7 @@ $QUICK = '-silent -quicklogin -vgui -oldtraymenu -nofriendsui -no-dwrite -vrdisa
 $STEAM = resolve-path (gp "HKCU:\SOFTWARE\Valve\Steam" SteamPath -ea 0).SteamPath
 #pushd "$STEAM\userdata"
 #$CLOUD = split-path (dir -filter "localconfig.vdf" -Recurse | sort LastWriteTime -Descending | Select -First 1).DirectoryName
+#popd
 
 function sc-nonew($fn,$txt) {
   if ((Get-Command set-content).Parameters['nonewline'] -ne $null) { set-content $fn $txt -nonewline -force }
@@ -41,6 +42,16 @@ dir "$STEAM\userdata\*\config\localconfig.vdf" -Recurse |foreach {
     default { [void]$t.Append("$_`n") } 
   }}
   if ($write) { sc-nonew $vdf $t.ToString(); " $vdf" }
+}
+
+#_# AveYo: add steam_reset.bat
+if (-not (test-path "$STEAM\steam_reset.bat")) { set-content "$STEAM\steam_reset.bat" @'
+@start "" "%~dp0steam.exe" -silent +quit force 
+@timeout /t 5 /nobreak
+@reg delete HKCU\Software\Microsoft\Windows\CurrentVersion\Run /v Steam /f
+@pushd "%~dp0userdata" & del /f /s /q localconfig.vdf sharedconfig.vdf
+@start "" "%~dp0steam.exe" -silent
+'@ -force
 }
 
 #_# AveYo: was this directly pasted into powershell? then we must save on disk
