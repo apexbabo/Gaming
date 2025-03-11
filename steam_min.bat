@@ -1,61 +1,95 @@
 @(set ^ "0=%~f0" -des ') & powershell -nop -c iex(out-string -i (gc -lit $env:0)) & exit /b ');.{
 
-" Steam_min : always starts in SmallMode with reduced ram usage when idle - AveYo, 2025.03.04 " 
+" Steam_min : always starts in SmallMode with reduced ram usage when idle - AveYo, 2025.03.10 " 
 
 $QUICK = '-silent -quicklogin -vgui -oldtraymenu -nofriendsui -no-dwrite -vrdisable -forceservice -console ' + 
          '-cef-force-browser-underlay -cef-delaypageload -cef-force-occlusion -cef-disable-gpu -cef-single-process'
 
-$STEAM = resolve-path (gp "HKCU:\SOFTWARE\Valve\Steam" SteamPath -ea 0).SteamPath
-#pushd "$STEAM\userdata"
-#$CLOUD = split-path (dir -filter "localconfig.vdf" -Recurse | sort LastWriteTime -Descending | Select -First 1).DirectoryName
-#popd
+$STEAM = resolve-path (gp "HKCU:\SOFTWARE\Valve\Steam" -ea 0).SteamPath
+$LASTW = 20250310
 
+$SignIntoFriends = 0
+
+#:: AveYo: lean and mean helper functions to process steam vdf files
+function vdf_read {
+  param([string[]]$vdf, [ref]$line=([ref]0), [string]$r='\A\s*("(?<k>[^"]+)"|(?<b>[\{\}]))\s*(?<v>"(?:\\"|[^"])*")?\Z') #
+  $obj = new-object System.Collections.Specialized.OrderedDictionary # ps 3.0: [ordered]@{}
+  while ($line.Value -lt $vdf.count) {
+    if ($vdf[$line.Value] -match $r) {
+      if ($matches.k) { $key = $matches.k }
+      if ($matches.v) { $obj.$key = $matches.v }
+      elseif ($matches.b -eq '{') { $line.Value++; $obj.$key = vdf_read -vdf $vdf -line $line }
+      elseif ($matches.b -eq '}') { break }
+    } 
+    $line.Value++
+  }
+  return $obj
+}
+function vdf_write {
+  param($vdf, [ref]$indent=([ref]0))
+  if ($vdf -isnot [System.Collections.Specialized.OrderedDictionary]) {return}
+  foreach ($key in $vdf.Keys) {
+    if ($vdf[$key] -is [System.Collections.Specialized.OrderedDictionary]) {
+      $t = "`t" * $indent.Value
+      write-output "$t`"$key`"`n$t{`n"
+      $indent.Value++; vdf_write -vdf $vdf[$key] -indent $indent; $indent.Value--
+      write-output "$t}`n"
+    } else {
+      $t = "`t" * $indent.Value
+      write-output "$t`"$key`"`t`t$($vdf[$key])`n"
+    }
+  }
+}
+function vdf_mkdir {
+  param($vdf, [string]$path=''); $s = $path.split('\',2); $key = $s[0]; $recurse = $s[1]
+  if ($vdf.Keys -notcontains $key) { $vdf.$key = new-object System.Collections.Specialized.OrderedDictionary }
+  if ($recurse) { vdf_mkdir $vdf[$key] $recurse }
+}
 function sc-nonew($fn,$txt) {
   if ((Get-Command set-content).Parameters['nonewline'] -ne $null) { set-content $fn $txt -nonewline -force }
   else { [IO.File]::WriteAllText($fn, $txt -join "`n") } # ps2.0
 }
 
-#_# AveYo: enable Small Mode and library performance options
-$DLG = "`t`t`t`t`"SteamDefaultDialog`"`t`t`"`#app_games`"`n"
+#_# AveYo: change steam startup location to Library window
 dir "$STEAM\userdata\*\7\remote\sharedconfig.vdf" -Recurse |foreach {
-  $vdf = $_; $t = new-object System.Text.StringBuilder; $write = $false
-  (gc $vdf) |foreach { switch -regex ($_) {
-    '\s+"SteamDefaultDialog"\s+"' { if ($_ -notmatch '\#app_games') { $write = !0; [void]$t.Append("$DLG") } } 
-    default { [void]$t.Append("$_`n") }  
-  }}
-  if ($write) { sc-nonew $vdf $t.ToString(); " $vdf" }
+  $file = $_; $write = $false; $vdf = vdf_read -vdf (gc $file -force)
+  vdf_mkdir $vdf["SteamDefaultDialog"] 'Software\Valve\Steam'
+  $key = $vdf["SteamDefaultDialog"]["Software"]["Valve"]["Steam"]
+  if ($key["SteamDefaultDialog"] -ne '"#app_games"') { $key["SteamDefaultDialog"] = '"#app_games"'; $write = $true }
+  if ($write) { sc-nonew $file $(vdf_write $vdf); write-output " $file " }
 }
 
-$SMA = "`t`t`t`t`"SmallMode`"`t`t`"1`"`n"
-$LBM = "`t`"LibraryDisableCommunityContent`"`t`t`"1`"`n`t`"LibraryDisplayIconInGameList`"`t`t`"0`"`n" +
-         "`t`"LibraryLowBandwidthMode`"`t`t`"1`"`n`t`"LibraryLowPerfMode`"`t`t`"1`"`n"
+#_# AveYo: enable Small Mode and library performance options
+$opt = @{LibraryDisableCommunityContent=1;LibraryLowBandwidthMode=1;LibraryLowPerfMode=1;LibraryDisplayIconInGameList=0}
 dir "$STEAM\userdata\*\config\localconfig.vdf" -Recurse |foreach {
-  $vdf = $_; $t = new-object System.Text.StringBuilder; $write = $false; $l1 = $true; $l2 = $true
-  (gc $vdf) |foreach { switch -regex ($_) {
-    '\s+"SmallMode"\s+"1"'             { if ($l1) { $l1 = !1; $write = !1 } } # skip
-    '\s+"SmallMode"\s+"0"'             { if ($l1) { $l1 = !1; $write = !0; [void]$t.Append("$SMA") } else { $write = !0 } }
-    '\s+"LastPlayedTimesSyncTime"\s+"' { if ($l1) { $l1 = !1; $write = !0; [void]$t.Append("${SMA}$_`n") } } # insert before
-    '\s+"PlayerLevel"\s+"'             { if ($l1) { $l1 = !1; $write = !0; [void]$t.Append("${SMA}$_`n") } }
-    '\s+"LastInstallFolderIndex"\s+"'        { if ($l2) { $l2 = !1; [void]$t.Append("${LBM}$_`n") } }
-    '\s+"FavoriteServersLastUpdateTime"\s+"' { if ($l2) { $l2 = !1; [void]$t.Append("${LBM}$_`n") } }
-    '\s+"(LibraryLowBandwidthMode|LibraryLowPerfMode|LibraryDisableCommunityContent|LibraryDisplayIconInGameList)"\s+"' {}
-    default { [void]$t.Append("$_`n") } 
+  $file = $_; $write = $false; $vdf = vdf_read -vdf (gc $file -force)
+  vdf_mkdir $vdf["UserLocalConfigStore"] 'Software\Valve\Steam'
+  $key = $vdf["UserLocalConfigStore"]["Software"]["Valve"]["Steam"]
+  if ($key["SmallMode"] -ne '"1"') { $key["SmallMode"] = '"1"'; $write = $true }
+  foreach ($o in $opt.Keys) { if ($vdf["UserLocalConfigStore"]["$o"] -ne "`"$($opt[$o])`"") {
+    $vdf["UserLocalConfigStore"]["$o"] = "`"$($opt[$o])`""; $write = $true
   }}
-  if ($write) { sc-nonew $vdf $t.ToString(); " $vdf" }
+  if ($SignIntoFriends -eq 0) {
+    vdf_mkdir $vdf["UserLocalConfigStore"] 'friends'
+    $key = $vdf["UserLocalConfigStore"]["friends"]
+    if ($key["SignIntoFriends"] -ne '"0"') { $key["SignIntoFriends"] = '"0"'; $write = $true }
+  }
+  if ($write) { sc-nonew $file $(vdf_write $vdf); write-output " $file " }
 }
 
 #_# AveYo: add steam_reset.bat
 if (-not (test-path "$STEAM\steam_reset.bat")) { set-content "$STEAM\steam_reset.bat" @'
+@reg delete HKCU\Software\Microsoft\Windows\CurrentVersion\Run /v Steam /f
+@reg delete "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Image File Execution Options\steamwebhelper.exe" /f
 @start "" "%~dp0steam.exe" -silent +quit force 
 @timeout /t 5 /nobreak
-@reg delete HKCU\Software\Microsoft\Windows\CurrentVersion\Run /v Steam /f
 @pushd "%~dp0userdata" & del /f /s /q localconfig.vdf sharedconfig.vdf
 @start "" "%~dp0steam.exe" -silent
 '@ -force
 }
 
 #_# AveYo: was this directly pasted into powershell? then we must save on disk
-if (!$env:0 -or $env:0 -ne "$STEAM\steam_min.bat") {
+if (!$env:0 -or $env:0 -ne "$STEAM\steam_min.bat" -or $LASTW -lt 20250310) {
   $0 = @('@(set ^ "0=%~f0" -des '') & powershell -nop -c iex(out-string -i (gc -lit $env:0)) & exit /b '');.{' +  
   ($MyInvocation.MyCommand.Definition) + '};$_press_Enter_if_pasted_in_powershell') -split'\r?\n'
   set-content "$STEAM\steam_min.bat" $0 -force
