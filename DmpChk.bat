@@ -7,7 +7,7 @@ $lastver = 20250310
 if (!$env:0 -or $env:0 -ne "$env:APPDATA\AveYo\DmpChk.bat" -or $lastver -gt 20250310) {
   $0 = @('@(set ^ "0=%~f0" -des '') &set "1=%~1"& powershell -nop -c iex(out-string -i (gc -lit $env:0)) & exit /b '');.{' +  
   ($MyInvocation.MyCommand.Definition) + '};$_press_Enter_if_pasted_in_powershell') -split'\r?\n'
-  set-content "$env:APPDATA\AveYo\DmpChk.bat" $0 -force
+  mkdir "$env:APPDATA\AveYo" -ea 0; set-content "$env:APPDATA\AveYo\DmpChk.bat" $0 -force
 } 
 
 #:: DmpChk by AveYo : read crash dump files (.dmp .mdmp)
