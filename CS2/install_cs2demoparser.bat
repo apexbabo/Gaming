@@ -86,18 +86,23 @@ internal class Program
     var readB = DemoFileReader.Create(demoB, new MemoryStream(demobytes));
     await readB.StartReadingAsync(default(CancellationToken));
 
-    string VsShot(string? p1 = "", string? p2 = "") {
+    string VsShot(string? victim = "", string? attacker = "") {
       var sb = new StringBuilder();
       foreach (var player in demoB.Players) {
-        if ((p1 != "" && player.PlayerName == p1) || (p2 != "" && player.PlayerName == p2)) {
+        if ((victim != "" && player.PlayerName == victim) || (attacker != "" && player.PlayerName == attacker)) {
           var pawn = player.PlayerPawn;
-          var vs = player.PlayerName == p1 ? "a" : "v";
+          var vs = player.PlayerName == victim ? "v" : "a";
           var team = player.Team.ToString()[0] + ""; if (team == "C") team = "CT";
-          var alive = (pawn?.IsAlive == true) ? "alive" : "dead "; 
-          sb.Append($"{demoB.CurrentGameTime,-16} {vs}    {player.PlayerName} {team} {alive} at {pawn?.LastPlaceName} ");
-          sb.Append($"X {pawn?.Origin.X} Y {pawn?.Origin.Y} Z {pawn?.Origin.Z} pitch {pawn?.Rotation.Pitch} ");
-          sb.Append($"yaw {pawn?.Rotation.Yaw} epitch {pawn?.EyeAngles.Pitch} eyaw {pawn?.EyeAngles.Yaw} ");
-          sb.AppendLine($"{pawn?.InputButtons}");
+          var alive = (pawn?.IsAlive == true) ? "alive" : "dead ";
+          sb.Append($"{demoB.CurrentGameTime,-16} {vs} {player.PlayerName} {team} {alive} at {pawn?.LastPlaceName} ");
+          sb.Append($"pos [{pawn?.Origin.X},{pawn?.Origin.Y},{pawn?.Origin.Z}] pitch {pawn?.Rotation.Pitch} ");
+          sb.AppendLine($"yaw {pawn?.Rotation.Yaw} eyes {pawn?.EyeAngles.Pitch} {pawn?.EyeAngles.Yaw}");
+          if (pawn?.IsAlive == true) {
+            sb.Append($"\t\t   VelocityMod {pawn?.VelocityModifier} AccuracyPenalty {pawn?.ActiveWeapon?.AccuracyPenalty} ");
+            sb.Append($"AimPunch Angle [{pawn?.AimPunchAngle.Pitch},{pawn?.AimPunchAngle.Yaw},{pawn?.AimPunchAngle.Roll}] ");
+            sb.AppendLine($"Vel [{pawn?.AimPunchAngleVel.Pitch},{pawn?.AimPunchAngleVel.Yaw},{pawn?.AimPunchAngleVel.Roll}]");
+            sb.AppendLine($"\t\t   {pawn?.InputButtons}  ShotsFired {pawn?.ShotsFired}");
+          }
         }
       }
       return sb.ToString();
@@ -127,12 +132,13 @@ internal class Program
   private static DemoShot SetupSection(CsDemoParser demo)
   {
     var dshot = new DemoShot();
+
     demo.Source1GameEvents.PlayerHurt += e => {
       var sb = new StringBuilder();
       string ta = e.Attacker?.Team.Teamname[0] + "", tv = e.Player?.Team.Teamname[0] + "";
       if (ta == "C") ta = "CT"; if (tv == "C") tv = "CT";
-      sb.Append($"{demo.CurrentGameTime} hurt {e.Attacker?.PlayerName} {ta} with {e.Weapon} ");
-      sb.Append($"{e.DmgHealth}/{e.Health}hp {e.DmgArmor}/{e.Armor}am to {(HitGroup)e.Hitgroup} "); 
+      sb.Append($"{demo.CurrentGameTime} H {e.Attacker?.PlayerName} {ta} with {e.Weapon} ");
+      sb.Append($"{e.DmgHealth}/{e.Health}hp {e.DmgArmor}/{e.Armor}am dmg to {(HitGroup)e.Hitgroup} "); 
       sb.Append(e.Attacker?.PlayerName != e.Player?.PlayerName ? $"of {e.Player?.PlayerName} {tv}" : $"of SELF");
       sb.AppendLine("");
       dshot.Add(demo.CurrentDemoTick, sb.ToString());
@@ -142,9 +148,9 @@ internal class Program
       var sb = new StringBuilder();
       string ta = e.Attacker?.Team.Teamname[0] + "", tv = e.Player?.Team.Teamname[0] + "";
       if (ta == "C") ta = "CT"; if (tv == "C") tv = "CT";
-      sb.Append($"{demo.CurrentGameTime} kill {e.Attacker?.PlayerName} {ta} with {e.Weapon} ");
+      sb.Append($"{demo.CurrentGameTime} K {e.Attacker?.PlayerName} {ta} with {e.Weapon} ");
       if (e.Headshot) { sb.Append("HS "); }
-      sb.AppendLine($"on {e.Player?.PlayerName} {tv}");
+      sb.AppendLine($"killed {e.Player?.PlayerName} {tv}");
       // AveYo: prepare to read 16 ticks before the death
       dshot.Add(demo.CurrentDemoTick, $"\f{e.Player?.PlayerName}\f{e.Attacker?.PlayerName}");
       dshot.Add(demo.CurrentDemoTick, sb.ToString());
