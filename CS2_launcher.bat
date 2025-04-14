@@ -72,6 +72,7 @@ $auto_start      = 1
 
 ##  override script handling or use default 0
 $do_not_restore_res_use_max_available = 0
+$use_opt_nojoy = 1
 
 ##  main script section -------------------------------------------------------------------- switch syntax highlight to powershell
 $APPID       =  730
@@ -400,8 +401,9 @@ if ($enable_fso -eq 1 -and $valid) {rp $flags $progr -force -ea 0}
 [Environment]::SetEnvironmentVariable("SetResBack", "$sdl_idx,$screen,$restore_width,$restore_height,$restore_refresh", 1)
 
 ##  prepare steam quick options
-$quick = '-silent -quicklogin -vgui -oldtraymenu -nofriendsui -no-dwrite -vrdisable -forceservice -console ' + 
-         '-cef-force-browser-underlay -cef-delaypageload -cef-force-occlusion ' +
+$nojoy = ('','-nojoy ')[$use_opt_nojoy -eq 1] 
+$quick = '-silent -quicklogin -vgui -oldtraymenu -nofriendsui -no-dwrite ' + $nojoy + 
+         '-vrdisable -forceservice -console -cef-force-browser-underlay -cef-delaypageload -cef-force-occlusion ' +
          '-cef-single-process -cef-in-process-gpu -cef-disable-gpu-compositing -cef-disable-gpu' 
 $steam_options = "$quick -applaunch $APPID"
 
@@ -972,7 +974,7 @@ namespace AveYo {
         return true;
       }
       eventHandler = new WinEventProc(OnWinEventProc);
-      RawBookHandle = SetWinEventBook(eventMin: EventMin, eventMax: EventMax, hmodWinEventProc: IntPtr.Zero,
+      RawBookHandle = SetWinEventHook(eventMin: EventMin, eventMax: EventMax, hmodWinEventProc: IntPtr.Zero,
                                    lpfnWinEventProc: eventHandler, idProcess: processId, idThread: threadId, dwFlags: _bookFlags);
       if (RawBookHandle != IntPtr.Zero) {
         return true;
@@ -992,7 +994,7 @@ namespace AveYo {
         return true;
       }
       // we need to unbook before freeing our callback in case an event sneaks in at the right time.
-      var result = UnbookWinEvent(RawBookHandle);
+      var result = UnhookWinEvent(RawBookHandle);
 
       eventHandler = null;
       RawBookHandle = IntPtr.Zero;
@@ -1030,12 +1032,12 @@ namespace AveYo {
     internal delegate void WinEventProc(IntPtr hWinEventBook, uint eventType, IntPtr hwnd, uint idObject,
                                       int idChild, uint dwEventThread, uint dwmsEventTime);
 
-    [DllImport("user32",CharSet = CharSet.Auto, SetLastError = true, EntryPoint="SetWinEvent\x48ook")] public static extern IntPtr
-    SetWinEventBook(uint eventMin, uint eventMax, IntPtr hmodWinEventProc, WinEventProc lpfnWinEventProc, uint idProcess,
-                    uint idThread, BookFlags dwFlags); /// AveYo: rename the H word
+    [DllImport("user32",CharSet = CharSet.Auto, SetLastError = true)] public static extern IntPtr
+    SetWinEventHook(uint eventMin, uint eventMax, IntPtr hmodWinEventProc, WinEventProc lpfnWinEventProc, uint idProcess,
+                    uint idThread, BookFlags dwFlags);
 
-    [DllImport("user32", CharSet = CharSet.Auto, SetLastError = true, EntryPoint="Un\x68ookWinEvent")] public static extern bool
-    UnbookWinEvent(IntPtr hWinEventBook); /// AveYo: rename the H word
+    [DllImport("user32", CharSet = CharSet.Auto, SetLastError = true)] public static extern bool
+    UnHookWinEvent(IntPtr hWinEventBook);
   }
 
   internal sealed class WinEventBookArgs : EventArgs
