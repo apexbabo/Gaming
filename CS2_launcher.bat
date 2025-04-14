@@ -1,14 +1,17 @@
-@(set ^ "0=%~f0" -des ') &set 1=%1& start "@" conhost powershell -nop -c iex(out-string -i (gc -lit $env:0)) & exit /b ');.{
+<# ::
+@echo off & set "0=%~f0"& set 1=%1& start "@" conhost powershell -nop -c iex(gc -lit $env:0 -raw) & exit /b
+#>.{
 
 <#
-  Counter-Strike 2 launcher - AveYo, 2025.04.13
-  while the game has focus, adjust desktop resolution to match it, then restore it on alt-tab
-  this alleviates most alt-tab and secondary screen issues, crashes on startup or high input lag
-  + only alt-tab or task manager restores native res, windows on other screens, winkey or winkey + D do not
+  Counter-Strike 2 launcher - AveYo, 2025.04.14  Major update
+  sets desktop resolution to match the game while in focus, then quickly restores native on alt-tab
+  this alleviates most alt-tab and secondary screen issues, crashes on startup and high input lag
+  Hint: confirm your game is switching to the proper mode (W I T) via Nvidia Frameview (works on any gpu)
+  + only switches res on alt-tab or task manager, ignoring windows on other screens, winkey or winkey + D
   + game starts on screen with mouse pointer on; seamlessly move between displays while game menu is active
-  + clear steam verify game integrity after a crash to relaunch quicker; toggle fso
+  + clear steam verify game integrity after a crash to relaunch quicker; add script shortcuts to steam library
   + unify settings for all users in game\csgo\cfg dir (and helps preserve settings when offline)
-  + optionally force specific video settings and cvars, at every launch
+  + force specific video settings and cvars at every launch; export game net info to console.log on Desktop
 #>
 
 ##  override resolution: no -1 max 0 |  if not appearing in res list, create the custom res in gpu driver settings / cru
@@ -45,6 +48,7 @@ $convars = @{
 # "trusted_launch"                                   = "1"           ##  1     trusted launch tracking
 }
 $extra_launch_options = @()
+#$extra_launch_options+= '-consolelog'                               ##  uncomment to filter net info to Desktop\console.log
 #$extra_launch_options+= '-allow_third_party_software'               ##  uncomment if recording via obs game capture
 #$extra_launch_options+= '-noreflex -noantilag'                      ##  uncomment if frametime issues - can be deceiving 
 
@@ -83,7 +87,7 @@ $CFG_MACHINE = "${APPNAME}_machine_convars.vcfg"
 $CFG_VIDEO   = "${APPNAME}_video.txt"
 $CFG_ENV     = "USRLOCALCSGO"
 $scriptname  = "CS2_Launcher"
-$scriptdate  =  20250413
+$scriptdate  =  20250414
 
 ##  whether start the game directly or wait for manual launch (if using faceit gamersclub br etc)
 if ($env:1 -match '-auto') { $auto_start = 1 } elseif ($env:1 -match '-manual') { $auto_start = 0 } 
@@ -161,16 +165,30 @@ foreach ($nr in $vdf["libraryfolders"].Keys) {
 }
 
 ##  was this pasted directly into powershell? then save on disk ------------------------------------------------------------------
-if (!$env:0 -or $env:0 -ne "$GAMEROOT\$scriptname.bat" -or $scriptdate -gt 20250413) {
-  $f0 = @('@(set ^ "0=%~f0" -des '') &set 1=%1& start "@" conhost powershell -nop -c iex(out-string -i (gc -lit $env:0))' +
-  ' & exit /b '');.{' + ($MyInvocation.MyCommand.Definition) + "};`$_press_Enter_if_pasted_in_powershell") -split'\r?\n'
+if (!$env:0 -or $env:0 -ne "$GAMEROOT\$scriptname.bat" -or $scriptdate -gt 20250414) {
+  $f0 = @("<# ::`n"+'@echo off & set "0=%~f0"& set 1=%1& start "@" conhost powershell -nop -c iex(gc -lit $env:0 -raw) & exit /b'+
+        "`n#>.{"+($MyInvocation.MyCommand.Definition)+"};`$_press_Enter_if_pasted_in_powershell") -split'\r?\n'
   set-content "$GAMEROOT\$scriptname.bat" $f0 -force
 }
 
 ##  close previous instances
 $c = 'HKCU:\Console\@'; ni $c -ea 0 >''; sp $c ScreenColors 0x0b -type dword -ea 0; sp $c QuickEdit 0 -type dword -ea 0
-ps | where {$_.MainWindowTitle -eq "$scriptname"} | kill; $host.ui.RawUI.WindowTitle = "$scriptname"
-#if (ps $APPNAME -ea 0) { write-host " $APPNAME is running " -fore Black -back Yellow; sleep 3; exit 0 }
+ps | where {$_.MainWindowTitle -eq "$scriptname"} | kill -force -ea 0; [Console]::Title = "$scriptname"
+
+##  clear verify integrity flags after a crash for quicker relaunch --------------------------------------------------------------
+$appmanifest="$STEAMAPPS\appmanifest_$APPID.acf"
+if (test-path $appmanifest) {
+  $vdf = vdf_parse (gc $appmanifest -force); $write = $false
+  if ($vdf["AppState"]["StateFlags"] -ne '"4"') { $vdf["AppState"]["StateFlags"]='"4"'; $write = $true }
+  if ($vdf["AppState"]["FullValidateAfterNextUpdate"]) { $vdf["AppState"]["FullValidateAfterNextUpdate"]='"0"'; $write = $true }
+  if ($write) {
+    if ((gp "HKCU:\Software\Valve\Steam\ActiveProcess" -ea 0).ActiveUser -gt 0) {
+      start "$STEAM\Steam.exe" -args "+app_stop $APPID +app_mark_validation $APPID 0 -shutdown" -wait; sleep 5
+      kill -name "$APPNAME","steam","steamwebhelper" -force -ea 0; del "$STEAM\.crash" -force -ea 0
+    }
+    sc-nonew $appmanifest (vdf_print $vdf)
+  }
+}
 
 ##  unify settings for all users in game\csgo\cfg dir via roaming profile environment variable -----------------------------------
 $ENV_M = [Environment]::GetEnvironmentVariable($CFG_ENV,2)
@@ -183,7 +201,7 @@ if ($ENV_M) {
   0,1 |foreach { [Environment]::SetEnvironmentVariable($CFG_ENV,"",$_) }
 }
 $ENV_U = [Environment]::GetEnvironmentVariable($CFG_ENV,1)
-if ($ENV_U -and $ENV_U -ne "$GAME" -and (ps "Steam" -ea 0)) {
+if ($ENV_U -and $ENV_U -ne "$GAME" -and ((gp "HKCU:\Software\Valve\Steam\ActiveProcess" -ea 0).ActiveUser -gt 0)) {
   write-host " closing Steam to refresh $CFG_ENV env " -fore Yellow
   start "$STEAM\Steam.exe" -args '-shutdown' -wait; sleep 5
 }
@@ -237,13 +255,13 @@ if ($refresh -gt 0) {
 }
 
 ##  SetRes lib dynamically sets game res to desktop, to alleviate input lag, alt-tab and secondary screens issues ----------------
-##  Init (screen) returns array of sdl monitor index, windows screen index, is primary, number of displays
-##  Focus (window_title, video_cfg, running_reg, def_nr, def_width, def_height, def_refresh)
-##  Change (output=0:none 1:def, screen, width, height, refresh=0:def, test=0:change 1:test)
-##  List (output=0:none 1:filter 2:all, screen, minw=1024, maxw=16384, maxh=16384)
+##  Init  (screen) returns array of sdl monitor index, windows screen index, is primary, number of displays
+##  Focus (verbose=1, window_title, video_cfg, running_reg, def_nr, def_width, def_height, def_refresh)
+##  Change(verbose=0:none 1:def, screen, width, height, refresh=0:def, test=0:change 1:test)
+##  List  (verbose=0:none 1:filter 2:all, screen, minw=1024, maxw=16384, maxh=16384)
 ##  returns array of: sdl_idx, screen, current_width, current_height, current_refresh, max_width, max_height, max_refresh
 ##  C# typefinition at the end of the script gets pre-compiled once here rather than let powershell do it slowly every launch
-$library1 = "SetRes"; $version1 = "2025.4.13.0"; $about1 = "match game and desktop res"; $path1 = "$GAMEROOT\$library1.dll"
+$library1 = "SetRes"; $version1 = "2025.4.14.0"; $about1 = "match game and desktop res"; $path1 = "$GAMEROOT\$library1.dll"
 if ((gi $path1 -force -ea 0).VersionInfo.FileVersion -ne $version1) { del $path1 -force -ea 0 } ; if (-not (test-path $path1)) {
   mkdir "$GAMEROOT" -ea 0 >'' 2>''; pushd $GAMEROOT; " one-time initialization of $library1 library..."
   set-content "$GAMEROOT\$library1.cs" $(($MyInvocation.MyCommand.Definition -split '<#[:]LIBRARY1[:].*')[1])
@@ -326,12 +344,12 @@ $file = "$USRCLOUD\config\localconfig.vdf"; $vdf = vdf_parse (gc $file -force); 
 vdf_mkdir $vdf "UserLocalConfigStore\Software\Valve\Steam\Apps\$APPID"
 $lo = ($vdf["UserLocalConfigStore"]["Software"]["Valve"]["Steam"]["Apps"]["$APPID"]["LaunchOptions"]).Trim('"')
 if ($lo -ne '') {
-  if ($lo -match '-coop_fullscreen\s?'         ) { $lo = $lo -replace $matches[0],'' }
-  if ($lo -match '-fullscreen\s?'              ) { $lo = $lo -replace $matches[0],''; $lo_f = 1 }
-  if ($lo -match '-sdl_displayindex\s+(\d+)\s?') { $lo = $lo -replace $matches[0],''; $lo_s = $matches[1] }
-  if ($lo -match '-w(idth)?\s+(\d+)\s?'        ) { $lo = $lo -replace $matches[0],''; $lo_w = $matches[2] }
-  if ($lo -match '-h(eight)?\s+(\d+)\s?'       ) { $lo = $lo -replace $matches[0],''; $lo_h = $matches[2] }
-  if ($lo -match '-r(efresh)?\s+([\d.]+)\s?'   ) { $lo = $lo -replace $matches[0],''; $lo_r = $matches[2] }
+  $__c = '-coop_fullscreen\s?';            if ($lo -match $__c) { $lo = $lo -replace $__c }
+  $__f = '-fullscreen\s?';                 if ($lo -match $__f) { $lo_f = 1; $lo = $lo -replace $__f }
+  $__s = '-sdl_displayindex\s+?(\d+)?\s?'; if ($lo -match $__s) { $lo_s = $matches[1]; $lo = $lo -replace $__s }
+  $__w = '-w(idth)?\s+?(\d+)?\s?';         if ($lo -match $__w) { $lo_w = $matches[2]; $lo = $lo -replace $__w }
+  $__h = '-h(eight)?\s+?(\d+)?\s?';        if ($lo -match $__h) { $lo_h = $matches[2]; $lo = $lo -replace $__h }
+  $__r = '-r(efresh)?\s+?([\d.]+)?\s?';    if ($lo -match $__r) { $lo_r = $matches[2]; $lo = $lo -replace $__r }
   if (($lo_f -and $exclusive -ne 1) -or ($lo_s -and $lo_s -ne $sdl_idx) -or
       ($lo_w -and $lo_w -ne $width) -or ($lo_h -and $lo_h -ne $height) -or ($lo_r -and $lo_r -ne $refresh)) { $write = $true } 
 }
@@ -367,21 +385,6 @@ foreach ($start in "-auto","-manual") {
   }
 }
 
-##  clear verify integrity flags after a crash for quicker relaunch --------------------------------------------------------------
-$appmanifest="$STEAMAPPS\appmanifest_$APPID.acf"
-if (test-path $appmanifest) {
-  $vdf = vdf_parse (gc $appmanifest -force); $write = $false
-  if ($vdf["AppState"]["StateFlags"] -ne '"4"') { $vdf["AppState"]["StateFlags"]='"4"'; $write = $true }
-  if ($vdf["AppState"]["FullValidateAfterNextUpdate"]) { $vdf["AppState"]["FullValidateAfterNextUpdate"]='"0"'; $write = $true }
-  if ($write) {
-    if ((gp "HKCU:\Software\Valve\Steam\ActiveProcess" -ea 0).ActiveUser -gt 0) {
-      start "$STEAM\Steam.exe" -args "+app_stop $APPID +app_mark_validation $APPID 0 -shutdown" -wait; sleep 5
-      kill -name "$APPNAME","steam","steamwebhelper" -force -ea 0; del "$STEAM\.crash" -force -ea 0
-    }
-    sc-nonew $appmanifest (vdf_print $vdf)
-  }
-}
-
 ##  toggle fullscreen optimizations for game launcher - FSO as a concept is an abomination ---------------------------------------
 $progr = "$GAMEROOT\$GAMEBIN\$APPNAME.exe"
 $flags = 'HKCU:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\AppCompatFlags\Layers'
@@ -397,21 +400,48 @@ if ($enable_fso -eq 1 -and $valid) {rp $flags $progr -force -ea 0}
 [Environment]::SetEnvironmentVariable("SetResBack", "$sdl_idx,$screen,$restore_width,$restore_height,$restore_refresh", 1)
 
 ##  prepare steam quick options
-$quick = '-silent -quicklogin -vgui -oldtraymenu -nofriendsui -vrdisable -forceservice -console ' + 
+$quick = '-silent -quicklogin -vgui -oldtraymenu -nofriendsui -no-dwrite -vrdisable -forceservice -console ' + 
          '-cef-force-browser-underlay -cef-delaypageload -cef-force-occlusion ' +
-         '-cef-single-process -cef-in-process-gpu -cef-disable-gpu-compositing -cef-disable-gpu -no-dwrite' 
+         '-cef-single-process -cef-in-process-gpu -cef-disable-gpu-compositing -cef-disable-gpu' 
 $steam_options = "$quick -applaunch $APPID"
+
+##  here you can insert anything to run before starting the game like start "some\program" -args "etc";
 
 ##  start game (and steam if not already running) or wait for manual / external launcher
 if ($auto_start -ge 1) {
-  write-host "`n asking Steam to start $WINDOWTITLE ... `t too long? run script again" -fore Yellow
-  powershell.exe -nop -c "Start-Process \`"$STEAM\steam.exe\`" \`"$steam_options\`""
+  write-host "`n waiting Steam to start $WINDOWTITLE ..." -fore Yellow
+  ni "HKCU:\Software\Classes\.steam_$APPNAME\shell\open\command" -force >''
+  sp "HKCU:\Software\Classes\.steam_$APPNAME\shell\open\command" "(Default)" "`"$STEAM\steam.exe`" $steam_options"
+  if (!(test-path "$STEAM\.steam_$APPNAME")) { set-content "$STEAM\.steam_$APPNAME" "" }
+  start explorer -args "`"$STEAM\.steam_$APPNAME`""
 } else {
   write-host "`n waiting manual / external launcher of $WINDOWTITLE ..." -fore Yellow
 }
 
+##  minimize script window
+sleep 3; powershell -win 2 -nop -c ';' 
+
 ##  while the game has focus, adjust desktop resolution to match it, then restore it on alt-tab ----------------------------------
-[AveYo.SetRes]::Focus($WINDOWTITLE, $CFG_VIDEO_FILE, $RUNNING, $screen, $restore_width, $restore_height, $restore_refresh)
+[AveYo.SetRes]::Focus(0, $WINDOWTITLE, $CFG_VIDEO_FILE, $RUNNING, $screen, $restore_width, $restore_height, $restore_refresh)
+
+##  here you can insert anything to run after game is closed like start "some\program" -args "etc";
+
+## log net quality at Desktop\APPNAME_console.log
+if ($extra_launch_options -match '-consolelog' -and (test-path "$GAME\console.log")) {  
+  copy "$GAME\console.log" "$([Environment]::GetFolderPath('Desktop'))\${APPNAME}_console.log" -force -ea 0
+  $chn = '\[STARTUP\]|\[Client\]|\[SteamNetSockets\]|\[NetSteamConn\]|\[Networking\]|\[BuildSparseShadowTree\]'
+  $flt = 'GameTypes|ResponseS|SteamRemoteStor|Steam config|CEntity|CPlayer|ClientPut|OptionsMenu|\* Panel|convar|Event System' + 
+   '|Disconnect|ExecuteQueuedOperations|IGameSystem|CGameRules|CLoopMode|prop_physics|GameClient|Certificate expires' +
+   '|CloseSteamNetConnection|Disassociating NetChan|Removing Steam Net|NetChan Setting Timeout|CSparseShadow' +
+   '|Created poll|pipe\] connected|Closing ''| entity|compatability|on panel| connected[\r\n]'
+  $log = out-string -i (gc -lit "$([Environment]::GetFolderPath('Desktop'))\${APPNAME}_console.log")
+  $log = $log -replace "(?s)(\d\d\/\d\d \d\d\:\d\d:\d\d\s\[[a-zA-Z ]+\])","`f`$1"
+  $log = $log -split "`f" -replace '(\d\d\/\d\d \d\d\:\d\d:\d\d\s)([^\[])','$2'
+  $log | foreach {
+    if ($_ -match $chn -and $_ -notmatch $flt) {$_ -replace "[\r\n]+","`r`n"}
+  } | set-content -nonew -lit "$([Environment]::GetFolderPath('Desktop'))\${APPNAME}_console.log" -force
+  write-host -fore green " AveYo: ${APPNAME}_console.log filtered on the Desktop "
+}
 
 ##  done, script closes
 [Environment]::Exit(0)
@@ -421,106 +451,131 @@ if ($auto_start -ge 1) {
 using System; using System.Collections.Generic; using System.Text; using System.Text.RegularExpressions; using System.Linq;
 using System.IO; using System.Threading; using System.ComponentModel; using System.Diagnostics; using System.Management;
 using System.Runtime.InteropServices; using System.Reflection;
-[assembly:AssemblyVersion("2025.4.13.0")] [assembly: AssemblyTitle("AveYo")]
+[assembly:AssemblyVersion("2025.4.14.0")] [assembly: AssemblyTitle("AveYo")]
 namespace AveYo {
   public static class SetRes
   {
-    public static void Focus(string title, string cfg, string reg, int def_nr, int def_width, int def_height, decimal def_refresh)
+    public static void Focus(int verbose, string title, string cfg, string reg, 
+                             int def_scr, int def_width, int def_height, decimal def_refresh)
     {
+      /// AveYo: cfg points to a game video.txt file for parsing the in-game res
       string pattern = @"(?sn)defaultres""\s+""(?<w>\d+)"".*defaultresheight""\s+""(?<h>\d+)"".*" +
                        @"refreshrate_numerator""\s+""(?<n>\d+)"".*refreshrate_denominator""\s+""(?<d>\d+)""";
-      string cfg_txt = File.ReadAllText(cfg);
+      string cfg_txt = File.ReadAllText(cfg), cfg_dir = Path.GetDirectoryName(cfg), cfg_ext = Path.GetExtension(cfg);
       var m = Regex.Match(cfg_txt, pattern);
       int cfg_w = 0, cfg_h = 0, cfg_n = 0, cfg_d = 0; decimal cfg_r = 0;
       Int32.TryParse(m.Groups["w"].Value, out cfg_w); Int32.TryParse(m.Groups["h"].Value, out cfg_h);
       Int32.TryParse(m.Groups["n"].Value, out cfg_n); Int32.TryParse(m.Groups["d"].Value, out cfg_d);
       if (cfg_n > 0 && cfg_d > 0) { cfg_r = cfg_n / cfg_d; } else { cfg_r = 0; }
 
+      /// AveYo: reg points to path\to\Steam\Apps\appid/val reg for parsing the running status
       string reg_key = reg.Split('/')[0], reg_val = reg.Split('/')[1];
       string wmi_query = "SELECT * FROM RegistryValueChangeEvent WHERE Hive = 'HKEY_USERS' AND KeyPath = '" +
-        System.Security.Principal.WindowsIdentity.GetCurrent().Owner.ToString() + reg_key + @"' AND ValueName='Running'";
+        System.Security.Principal.WindowsIdentity.GetCurrent().Owner.ToString() + reg_key + @"' AND ValueName='" + reg_val + @"'";
       string reg_query = "HKEY_CURRENT_USER" + reg_key.Replace("\\\\", "\\");
-      
-      var devices = GetAllDisplayDevices();
-      var monitor = devices.FirstOrDefault(d => d.IsCurrent);
-      if (def_nr > 0 && def_nr <= devices.Count) monitor = devices.FirstOrDefault(d => d.MonitorIndex == def_nr);
 
-      MSG msg;
-      bool active = false;
-      int running = (int)Microsoft.Win32.Registry.GetValue(reg_query, reg_val, 0), ret = 1, lastevt = 0;
-     
-      if (running > 0)
-        active = true;
+      var _bookmon = new WinEventBook(Const.EVENT_SYSTEM_FOREGROUND, Const.EVENT_SYSTEM_FOREGROUND);
+      var _filemon = new FileSystemWatcher() { Path = cfg_dir, NotifyFilter = NotifyFilters.LastWrite, Filter = '*' + cfg_ext };
+      var _regimon = new ManagementEventWatcher(new WqlEventQuery(wmi_query));
+      var _cancelt = new CancellationTokenSource();
+      var _dispose = true;
+      var _readcfg = false;
+      var _started = false;
+      var _running = (int)Microsoft.Win32.Registry.GetValue(reg_query, reg_val, 0);
+      var _lastevt = 0;
 
-      using (ManagementEventWatcher watcher = new ManagementEventWatcher(new WqlEventQuery(wmi_query)))
-      using (WinEventBook booker = new WinEventBook(Const.EVENT_SYSTEM_FOREGROUND, Const.EVENT_SYSTEM_FOREGROUND))
-      {
-        /// AveYo: registry listener (not monitoring processes directly)
-        watcher.EventArrived += (s, e) => { 
-          running = (int)Microsoft.Win32.Registry.GetValue(reg_query, reg_val, 0);
-          if (!active && running == 1)
-            active = true;
-          if (active && running == 0) {
-            active = false;
-            lastevt = 0;
-            Console.WriteLine("{0} closed ", title);
-            PostQuitMessage(0);
-            booker.TryUnbook();
-            watcher.Stop();
-            Change(1, def_nr, def_width, def_height, def_refresh, 0);
-            Environment.Exit(0); /// todo: graceful return
-          }
-        };
-        watcher.Start();
-
-        /// AveYo: focus listener
-        booker.EventReceived += (s, e) => {
-          if (active)
-          {
-            StringBuilder lpTitle = new StringBuilder(GetWindowTextLength(e.WindowHandle) + 1);
-            GetWindowTextA(e.WindowHandle, lpTitle, lpTitle.Capacity);
-            string lpT = lpTitle.ToString();
-            //Console.WriteLine(" {0} +{1}", lpT, lastevt);
-            
-            if (lpT == title) {
-              string video = File.ReadAllText(cfg);
-              if (video != cfg_txt) {
-                cfg_txt = video;
-                var rm = Regex.Match(cfg_txt, pattern);
-                Int32.TryParse(rm.Groups["w"].Value, out cfg_w); Int32.TryParse(rm.Groups["h"].Value, out cfg_h);
-                Int32.TryParse(rm.Groups["n"].Value, out cfg_n); Int32.TryParse(rm.Groups["d"].Value, out cfg_d);
-                if (cfg_n > 0 && cfg_d > 0) { cfg_r = cfg_n / cfg_d; } else { cfg_r = 0; }
-              }
-              lastevt = 1; Change(1, def_nr, cfg_w, cfg_h, def_refresh, 0);
-            }
-            else if (lpT == "Task Manager") { lastevt = 0; Change(1, def_nr, def_width, def_height, def_refresh, 0); }
-            else if (lpT == "Task Switching") { if (lastevt > 0) lastevt++; }
-            else {
-              if (lastevt >= 2 && lpT != "" && lpT != "Search" && lpT != "Program Manager") {
-                RECT cR = new RECT(), mR = monitor.Bounds;
-                GetWindowRect(e.WindowHandle, out cR);            
-                bool intersect = (cR.left+16)<mR.right && (cR.right-16)>mR.left && (cR.top+16)<mR.bottom && (cR.bottom-16)>mR.top;
-                //Console.WriteLine("{0}\t{1},{2},{3},{4}\t{5},{6},{7},{8}\t{9}", lpT, cR.left,cR.right,cR.top,cR.bottom, 
-                //  mR.left,mR.right,mR.top,mR.bottom,intersect);
-                if (intersect) { lastevt = 0; Change(1, def_nr, def_width, def_height, def_refresh, 0); }
-              }
-            }
-          }
-        };
-        booker.BookGlobal();
-       
-        /// todo: reliable return from this unsofisticated msg loop
-        while ((ret = GetMessage(out msg, IntPtr.Zero, Const.EVENT_SYSTEM_FOREGROUND, Const.EVENT_SYSTEM_FOREGROUND)) != 0)
-        {
-          if (ret == -1) { break; }
-          else { TranslateMessage(ref msg); DispatchMessage(ref msg); }
-        }
-        
-        booker.TryUnbook();
-        watcher.Stop();
-        Change(1, def_nr, def_width, def_height, def_refresh, 0);
-        Environment.Exit(0); /// todo: graceful return
+      if (_running > 0) {
+        _started = true;
       }
+
+      /// AveYo: window focus watcher
+      _bookmon.EventReceived += (s, e) => {
+        if (_started)
+        {
+          StringBuilder lpTitle = new StringBuilder(GetWindowTextLength(e.WindowHandle) + 1);
+          GetWindowTextA(e.WindowHandle, lpTitle, lpTitle.Capacity);
+          string lpT = lpTitle.ToString();
+          //Console.WriteLine(" {0} +{1}", lpT, _lastevt);
+          
+          if (lpT == title) {
+            if (_readcfg) {
+              cfg_txt = File.ReadAllText(cfg);
+              var rm = Regex.Match(cfg_txt, pattern);
+              Int32.TryParse(rm.Groups["w"].Value, out cfg_w); Int32.TryParse(rm.Groups["h"].Value, out cfg_h);
+              Int32.TryParse(rm.Groups["n"].Value, out cfg_n); Int32.TryParse(rm.Groups["d"].Value, out cfg_d);
+              if (cfg_n > 0 && cfg_d > 0) { cfg_r = cfg_n / cfg_d; } else { cfg_r = 0; }
+              _readcfg = false;
+            }
+            _lastevt = 1; Change(verbose, def_scr, cfg_w, cfg_h, def_refresh, 0);
+          }
+          else if (lpT == "Task Manager") { _lastevt = 0; Change(verbose, def_scr, def_width, def_height, def_refresh, 0); }
+          else if (lpT == "Task Switching") { if (_lastevt > 0) _lastevt++; }
+          else {
+            if (_lastevt >= 2 && lpT != "" && lpT != "Search" && lpT != "Program Manager") {
+              var devices = GetAllDisplayDevices();
+              var monitor = devices.FirstOrDefault(d => d.IsCurrent);
+              if (def_scr > 0 && def_scr <= devices.Count) monitor = devices.FirstOrDefault(d => d.MonitorIndex == def_scr);
+              RECT cR = new RECT(), mR = monitor.Bounds;
+              GetWindowRect(e.WindowHandle, out cR);            
+              bool intersect = (cR.left+16)<mR.right && (cR.right-16)>mR.left && (cR.top+16)<mR.bottom && (cR.bottom-16)>mR.top;
+              if (verbose > 0)
+                Console.WriteLine("{0}\t{1},{2},{3},{4}\t{5},{6},{7},{8}\t{9}", 
+                  lpT, cR.left,cR.right,cR.top,cR.bottom,  mR.left,mR.right,mR.top,mR.bottom,  intersect);
+              if (intersect) { _lastevt = 0; Change(verbose, def_scr, def_width, def_height, def_refresh, 0); }
+            }
+          }
+        }
+      };
+
+      /// AveYo: video.txt cfg file watcher
+      _filemon.Changed += (s, e) => { 
+         _readcfg = true;
+      };
+
+      /// AveYo: steam\appid Running registry watcher
+      _regimon.EventArrived += (s, e) => { 
+        _running = (int)Microsoft.Win32.Registry.GetValue(reg_query, reg_val, 0);
+        if (!_started && _running == 1)
+          _started = true;
+        if (_started && _running == 0) {
+          _started = false;
+          _cancelt.Cancel();
+        }
+      };
+      
+      /// AveYo: console close watcher
+      _consoleCtrlHandler += s =>
+      {
+        if (_dispose) {
+          Console.WriteLine(" script closed");
+          _bookmon.TryUnbook();
+          _filemon.EnableRaisingEvents = false;
+          _regimon.Stop();
+          Change(verbose, def_scr, def_width, def_height, def_refresh, 0);
+          _bookmon.Dispose();
+          _filemon.Dispose();
+          _regimon.Dispose();            
+        }
+        return false;   
+      };
+     
+      _bookmon.BookGlobal();
+      _filemon.EnableRaisingEvents = true;
+      _regimon.Start();
+      SetConsoleCtrlHandler(_consoleCtrlHandler, true);
+
+      /// AveYo: wait loop
+      while (!_cancelt.IsCancellationRequested) { if (_cancelt.Token.WaitHandle.WaitOne()) { break; } }
+      
+      /// AveYo: cleanup
+      Console.WriteLine("{0} closed ", title);
+      _bookmon.TryUnbook();
+      _filemon.EnableRaisingEvents = false;
+      _regimon.Stop();
+      Change(verbose, def_scr, def_width, def_height, def_refresh, 0);
+      _bookmon.Dispose();
+      _filemon.Dispose();
+      _regimon.Dispose();
     }
 
     public static int[] Init(int Screen = -1)
@@ -538,27 +593,27 @@ namespace AveYo {
       return new int[] { monitor.SDLIndex, monitor.MonitorIndex, monitor.IsPrimary ? 1 : 0, devices.Count };
     }
 
-    public static int[] List(int Output = 1, int Screen = -1, int MinWidth = 1024, int MaxWidth = 16384, int MaxHeight = 16384)
+    public static int[] List(int Verbose = 1, int Screen = -1, int MinWidth = 1024, int MaxWidth = 16384, int MaxHeight = 16384)
     {
       var devices = GetAllDisplayDevices();
       var monitor = devices.FirstOrDefault(d => d.IsCurrent);
       if (Screen > 0 && Screen <= devices.Count) monitor = devices.FirstOrDefault(d => d.MonitorIndex == Screen);
 
-      if (Output != 0) foreach (var display in devices) Console.WriteLine(display.ToString());
+      if (Verbose != 0) foreach (var display in devices) Console.WriteLine(display.ToString());
 
       var displayModes = GetAllDisplaySettings(monitor.DriverName);
       var current      = GetCurrentDisplaySetting(monitor.DriverName);
       IList<DisplaySettings> filtered = displayModes;
 
       /// AveYo: MaxWidth & MaxHeight are used to aggregate the list further by Refresh rate
-      if (Output == 1)
+      if (Verbose == 1)
       {
         filtered = displayModes
           .Where(d => d.Width >= MinWidth && d.Width <= MaxWidth && d.Height <= MaxHeight && d.Orientation == current.Orientation)
           .OrderByDescending(d => d.Width).ThenByDescending(d => d.Refresh)
           .GroupBy(d => new {d.Width, d.Height}).Select(g => g.First()).ToList();
       }
-      else if (Output == 2 || Output == 0 && MaxWidth != 16384)
+      else if (Verbose == 2 || Verbose == 0 && MaxWidth != 16384)
       {
         filtered = displayModes
           .Where(d => d.Width >= MinWidth && d.Width <= MaxWidth && d.Height <= MaxHeight)
@@ -577,19 +632,19 @@ namespace AveYo {
       {
         if (set.Equals(current))
         {
-          if (Output != 0) Console.WriteLine(set.ToString(true) + " [current]");
+          if (Verbose != 0) Console.WriteLine(set.ToString(true) + " [current]");
         }
         else
         {
-          if (Output != 0) Console.WriteLine(set.ToString(true));
+          if (Verbose != 0) Console.WriteLine(set.ToString(true));
         }
       }
-      if (Output != 0) Console.WriteLine();
+      if (Verbose != 0) Console.WriteLine();
       return new int[] { monitor.SDLIndex, monitor.MonitorIndex,
         (int)current.Width, (int)current.Height, (int)current.Refresh, (int)max.Width, (int)max.Height, (int)max.Refresh };
     }
 
-    public static int[] Change(int Output = 1, int Screen = -1, int Width = 0, int Height = 0, decimal Refresh = 0, int Test = 0)
+    public static int[] Change(int Verbose = 1, int Screen = -1, int Width = 0, int Height = 0, decimal Refresh = 0, int Test = 0)
     {
       var devices = GetAllDisplayDevices();
       var monitor = devices.FirstOrDefault(d => d.IsCurrent);
@@ -601,7 +656,7 @@ namespace AveYo {
 
       if (Width == 0 || Height == 0)
       {
-        if (Output != 0) Console.WriteLine(" Width and Height parameters required.\n");
+        if (Verbose != 0) Console.WriteLine(" Width and Height parameters required.\n");
         return new int[] { monitor.SDLIndex, monitor.MonitorIndex,
           (int)current.Width, (int)current.Height, (int)current.Refresh, 0, 0, 0, 1 };
       }
@@ -619,7 +674,7 @@ namespace AveYo {
       if (set == null)
       {
         /// AveYo: Resolution fallback to current
-        if (Output != 0) Console.WriteLine(" No matching display mode!\n");
+        if (Verbose != 0) Console.WriteLine(" No matching display mode!\n");
         set = current;
         return new int[] { monitor.SDLIndex, monitor.MonitorIndex,
           (int)set.Width, (int)set.Height, (int)set.Refresh, (int)set.Width, (int)set.Height, (int)set.Refresh, 2 };
@@ -657,13 +712,13 @@ namespace AveYo {
           throw new InvalidOperationException(string.Format("{0} : {1} = FAIL", set.ToString(true), monitor.DisplayName));
 
         //ChangeDisplaySettingsEx(IntPtr.Zero, IntPtr.Zero, IntPtr.Zero, 0, IntPtr.Zero);
-        if (Output != 0) Console.WriteLine(string.Format("{0} : {1} = OK", set.ToString(true), monitor.DisplayName));
+        if (Verbose != 0) Console.WriteLine(string.Format("{0} : {1} = OK", set.ToString(true), monitor.DisplayName));
         return new int[] { monitor.SDLIndex, monitor.MonitorIndex,
           (int)current.Width, (int)current.Height, (int)current.Refresh, (int)set.Width, (int)set.Height, (int)set.Refresh, 0 };
       }
       catch(Exception ex)
       {
-        if (Output != 0) Console.WriteLine(ex.Message);
+        if (Verbose != 0) Console.WriteLine(ex.Message);
         return new int[] { monitor.SDLIndex, monitor.MonitorIndex,
           (int)current.Width, (int)current.Height, (int)current.Refresh, 0, 0, 0, 3 };
       }
@@ -807,10 +862,17 @@ namespace AveYo {
 
     private static IntPtr consolehWnd = GetConsoleWindow();
 
+    private static ConsoleCtrlHandlerDelegate _consoleCtrlHandler;
+
+    private delegate bool ConsoleCtrlHandlerDelegate(int sig);
+
     private delegate bool EnumDisplayMonitorsDelegate(IntPtr hMonitor, IntPtr hdcMonitor, ref RECT lprcMonitor, IntPtr dwData);
 
     [DllImport("kernel32", ExactSpelling = true)] private static extern IntPtr
     GetConsoleWindow();
+
+    [DllImport("kernel32")] private static extern bool
+    SetConsoleCtrlHandler(ConsoleCtrlHandlerDelegate handler, bool add);
 
     [DllImport("user32")] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool
     GetWindowRect(IntPtr hWnd, out RECT lpRect);
@@ -844,29 +906,17 @@ namespace AveYo {
     [DllImport("user32")] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool
     SetProcessDPIAware();
 
-    [DllImport("user32")] private static extern int
-    GetMessage(out MSG lpMsg, IntPtr hWnd, uint wMsgFilterMin, uint wMsgFilterMax);
-
-    [DllImport("user32")] private static extern bool
-    TranslateMessage([In] ref MSG lpMsg);
-
-    [DllImport("user32")] private static extern IntPtr
-    DispatchMessage([In] ref MSG lpMsg);
-
-    [DllImport("user32")] private static extern void
-    PostQuitMessage(int nExitCode);
-
     [DllImport("user32", CharSet = CharSet.Ansi)] private static extern int
     GetWindowTextLength([In] IntPtr hWnd);
 
     [DllImport("user32", CharSet = CharSet.Ansi)] private static extern int
     GetWindowTextA([In] IntPtr hWnd, [In, Out] StringBuilder lpString, [In] int nMaxCount);
 
-    [DllImport("user32")] public static extern int
-    SystemParametersInfo(int uiAction, int uiParam, int[] pvParam, int fWinIni);
+    //[DllImport("user32")] public static extern int
+    //SystemParametersInfo(int uiAction, int uiParam, int[] pvParam, int fWinIni);
 
-    [DllImport("user32")] public static extern int
-    SystemParametersInfo(int uiAction, int uiParam, IntPtr pvParam, int fWinIni);
+    //[DllImport("user32")] public static extern int
+    //SystemParametersInfo(int uiAction, int uiParam, IntPtr pvParam, int fWinIni);
   }
 
   internal class WinEventBook : IDisposable
@@ -1239,13 +1289,6 @@ namespace AveYo {
 
   [StructLayout(LayoutKind.Sequential)]
   internal struct RECT { public int left; public int top; public int right; public int bottom; }
-
-  [StructLayout(LayoutKind.Sequential)]
-  internal struct MSG
-  {
-    public IntPtr hwnd; public uint message; public IntPtr wParam; public IntPtr lParam;
-    public uint time; public POINTL pt; public uint lPrivate;
-  }
 
   [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Ansi)]
   internal struct DISPLAY_DEVICE
