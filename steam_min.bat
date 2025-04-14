@@ -6,13 +6,14 @@
 
 $FriendsSignIn = 0
 $ShowGameIcons = 0
+$use_opt_nojoy = 1
 
-$QUICK = '-silent -quicklogin -vgui -oldtraymenu -nofriendsui -no-dwrite -vrdisable -forceservice -console ' + 
-         '-cef-force-browser-underlay -cef-delaypageload -cef-force-occlusion ' +
-         '-cef-single-process -cef-in-process-gpu -cef-disable-gpu-compositing -cef-disable-gpu' 
-
-$STEAM = resolve-path (gp "HKCU:\SOFTWARE\Valve\Steam" -ea 0).SteamPath
 $stamp = 20250414
+$NOJOY = ('','-nojoy ')[$use_opt_nojoy -eq 1] 
+$QUICK = '-silent -quicklogin -vgui -oldtraymenu -nofriendsui -no-dwrite ' + $NOJOY + 
+         '-vrdisable -forceservice -console -cef-force-browser-underlay -cef-delaypageload -cef-force-occlusion ' +
+         '-cef-single-process -cef-in-process-gpu -cef-disable-gpu-compositing -cef-disable-gpu' 
+$STEAM = resolve-path (gp "HKCU:\SOFTWARE\Valve\Steam" -ea 0).SteamPath
 
 ##  AveYo: minimize script
 powershell -win 2 -nop -c ';' 
