@@ -1,9 +1,7 @@
-<# ::
-@echo off & set "0=%~f0"& set 1=%1& start "@" conhost powershell -nop -c iex(gc -lit $env:0 -raw) & exit /b
-#>.{
+@(echo off%)[1] #%) & goto powershell
 
 <#
-  Counter-Strike 2 launcher - AveYo, 2025.04.14  Major update
+  Counter-Strike 2 launcher - AveYo, 2025.04.15  Major update
   sets desktop resolution to match the game while in focus, then quickly restores native on alt-tab
   this alleviates most alt-tab and secondary screen issues, crashes on startup and high input lag
   Hint: confirm your game is switching to the proper mode (W I T) via Nvidia Frameview (works on any gpu)
@@ -14,7 +12,7 @@
   + force specific video settings and cvars at every launch; export game net info to console.log on Desktop
 #>
 
-##  override resolution: no -1 max 0 |  if not appearing in res list, create the custom res in gpu driver settings / cru
+##  override resolution: no -1 max 0 |  IF NOT APPEARING IN RES LIST, CREATE THE CUSTOM RES IN GPU DRIVER SETTINGS / CRU
 ##  fast custom res for [4:3] = 1080x810  1280x960  1440x1080   [16:10] = 1296x810  1440x900   [16:9] = 1440x810  1632x918
 $force_width     = -1
 $force_height    = -1
@@ -71,7 +69,9 @@ $add_to_library  = 1
 $auto_start      = 1
 
 ##  override script handling or use default 0
+$do_not_set_desktop_res_to_match_game = 0
 $do_not_restore_res_use_max_available = 0
+$do_not_minimize_window_while_waiting = 0
 $use_opt_nojoy = 1
 
 ##  main script section -------------------------------------------------------------------- switch syntax highlight to powershell
@@ -88,23 +88,23 @@ $CFG_MACHINE = "${APPNAME}_machine_convars.vcfg"
 $CFG_VIDEO   = "${APPNAME}_video.txt"
 $CFG_ENV     = "USRLOCALCSGO"
 $scriptname  = "CS2_Launcher"
-$scriptdate  =  20250414
-
-##  whether start the game directly or wait for manual launch (if using faceit gamersclub br etc)
-if ($env:1 -match '-auto') { $auto_start = 1 } elseif ($env:1 -match '-manual') { $auto_start = 0 } 
+$scriptdate  =  20250415
 
 ##  detect STEAM
-$STEAM = resolve-path (gp "HKCU:\SOFTWARE\Valve\Steam").SteamPath
+$STEAM = resolve-path (gp "HKCU:\SOFTWARE\Valve\Steam").SteamPath; $REOPEN = $false
 if (-not (test-path "$STEAM\steam.exe") -or -not (test-path "$STEAM\steamapps\libraryfolders.vdf")) {
-  write-host " Steam not found! " -fore Black -back Yellow; timeout -1; exit 0
+  write-host " Steam not found! " -fore Black -back Yellow; sleep 7; exit 0
 }
+
+##  common escaped chars
+${\"} = "`""; ${\$} = "`$"; ${\f} = "`f"; ${\t} = "`t"; ${\r} ="`r"; ${\n} = "`n"
 
 ##  AveYo: lean and mean helper functions to process steam vdf files -------------------------------------------------------------
 function vdf_parse {
-  param([string[]]$vdf, [ref]$line=([ref]0), [string]$r='\A\s*("(?<k>[^"]+)"|(?<b>[\{\}]))\s*(?<v>"(?:\\"|[^"])*")?\Z') #
+  param([string[]]$vdf, [ref]$line = ([ref]0), [string]$re = '\A\s*("(?<k>[^"]+)"|(?<b>[\{\}]))\s*(?<v>"(?:\\"|[^"])*")?\Z') ##
   $obj = new-object System.Collections.Specialized.OrderedDictionary # ps 3.0: [ordered]@{}
   while ($line.Value -lt $vdf.count) {
-    if ($vdf[$line.Value] -match $r) {
+    if ($vdf[$line.Value] -match $re) {
       if ($matches.k) { $key = $matches.k }
       if ($matches.v) { $obj.$key = $matches.v }
       elseif ($matches.b -eq '{') { $line.Value++; $obj.$key = vdf_parse -vdf $vdf -line $line }
@@ -115,28 +115,28 @@ function vdf_parse {
   return $obj
 }
 function vdf_print {
-  param($vdf, [ref]$indent=([ref]0))
+  param($vdf, [ref]$indent = ([ref]0))
   if ($vdf -isnot [System.Collections.Specialized.OrderedDictionary]) {return}
   foreach ($key in $vdf.Keys) {
     if ($vdf[$key] -is [System.Collections.Specialized.OrderedDictionary]) {
-      $t = "`t" * $indent.Value
-      write-output "$t`"$key`"`n$t{`n"
+      $tabs = ${t} * $indent.Value
+      write-output "$tabs${\"}$key${\"}${\n}$tabs{${\n}"
       $indent.Value++; vdf_print -vdf $vdf[$key] -indent $indent; $indent.Value--
-      write-output "$t}`n"
+      write-output "$tabs}${\n}"
     } else {
-      $t = "`t" * $indent.Value
-      write-output "$t`"$key`"`t`t$($vdf[$key])`n"
+      $tabs = ${t} * $indent.Value
+      write-output "$tabs${\"}$key${\"}${\t}${\t}$($vdf[$key])${\n}"
     }
   }
 }
 function vdf_mkdir {
-  param($vdf, [string]$path=''); $s = $path.split('\',2); $key = $s[0]; $recurse = $s[1]
+  param($vdf, [string]$path = ''); $s = $path.split('\',2); $key = $s[0]; $recurse = $s[1]
   if ($vdf.Keys -notcontains $key) { $vdf.$key = new-object System.Collections.Specialized.OrderedDictionary }
   if ($recurse) { vdf_mkdir $vdf[$key] $recurse }
 }
 function sc-nonew($fn,$txt) {
   if ((Get-Command set-content).Parameters['nonewline'] -ne $null) { set-content $fn $txt -nonewline -force }
-  else { [IO.File]::WriteAllText($fn, $txt -join "`n") } # ps2.0
+  else { [IO.File]::WriteAllText($fn, $txt -join ${\n}) } # ps2.0
 }
 
 ##  detect active user from registry / loginusers.vdf / latest localconfig.vdf ---------------------------------------------------
@@ -166,15 +166,28 @@ foreach ($nr in $vdf["libraryfolders"].Keys) {
 }
 
 ##  was this pasted directly into powershell? then save on disk ------------------------------------------------------------------
-if (!$env:0 -or $env:0 -ne "$GAMEROOT\$scriptname.bat" -or $scriptdate -gt 20250414) {
-  $f0 = @("<# ::`n"+'@echo off & set "0=%~f0"& set 1=%1& start "@" conhost powershell -nop -c iex(gc -lit $env:0 -raw) & exit /b'+
-        "`n#>.{"+($MyInvocation.MyCommand.Definition)+"};`$_press_Enter_if_pasted_in_powershell") -split'\r?\n'
-  set-content "$GAMEROOT\$scriptname.bat" $f0 -force
+if ($args[0] -ne "$GAMEROOT\$scriptname.bat" -or $scriptdate -gt 20250414) {
+  set-content "$GAMEROOT\$scriptname.bat" $($MyInvocation.MyCommand.Definition.Trim("`r`n") -split'\r?\n') -force
 }
 
-##  close previous instances
-$c = 'HKCU:\Console\@'; ni $c -ea 0 >''; sp $c ScreenColors 0x0b -type dword -ea 0; sp $c QuickEdit 0 -type dword -ea 0
-ps | where {$_.MainWindowTitle -eq "$scriptname"} | kill -force -ea 0; [Console]::Title = "$scriptname"
+##  close previous instances: convoluted on terminal / 11 without conhost trick, but luckily this script has a reg listener:
+$reg = $RUNNING.Replace('\\','\')-split'/'; $key = $reg[0]; $val = $reg[1]; $old = (gp "HKCU:$key").$val; 
+sp "HKCU:$key" $val 2; sleep -m 250; sp "HKCU:$key" $val $old; [Console]::Title = "$scriptname"
+
+<#
+:powershell launcher via explorer with batch escaped args: 0=self, 1-8=args, 9=workdir - AveYo, 2025 
+set "a=%~f0<>%~1<>%~2<>%~3<>%~4<>%~5<>%~6<>%~7<>%~8<>%CD%" & setlocal EnableDelayedExpansion
+set "a='!a:'=''!'" & set "a=!a:<>=','!" & set "a=!a:%%=%%%%!" & set "a=!a:\"=\\""!"
+set "a=powershell -nop -c $args=!a!;. ([scriptblock]::Create((gc -lit $args[0] -raw))) @args"
+set ea="%temp%\.explorer" & echo;HKCU\Software\Classes\.explorer\shell\open\command>!ea! & echo;  = "!a!">>!ea!
+regini -i 2 !ea! >nul & start explorer !ea! & exit /b
+#>
+
+##  match initial batch workdir
+pushd -lit $args[9]
+
+##  whether start the game directly or wait for manual launch (if using faceit gamersclub br etc)
+if ($args[1] -match '-auto') { $auto_start = 1 } elseif ($args[1] -match '-manual') { $auto_start = 0 } 
 
 ##  clear verify integrity flags after a crash for quicker relaunch --------------------------------------------------------------
 $appmanifest="$STEAMAPPS\appmanifest_$APPID.acf"
@@ -185,7 +198,7 @@ if (test-path $appmanifest) {
   if ($write) {
     if ((gp "HKCU:\Software\Valve\Steam\ActiveProcess" -ea 0).ActiveUser -gt 0) {
       start "$STEAM\Steam.exe" -args "+app_stop $APPID +app_mark_validation $APPID 0 -shutdown" -wait; sleep 5
-      kill -name "$APPNAME","steam","steamwebhelper" -force -ea 0; del "$STEAM\.crash" -force -ea 0
+      kill -name "$APPNAME","steam","steamwebhelper" -force -ea 0; del "$STEAM\.crash" -force -ea 0; $REOPEN = $true
     }
     sc-nonew $appmanifest (vdf_print $vdf)
   }
@@ -262,7 +275,7 @@ if ($refresh -gt 0) {
 ##  List  (verbose=0:none 1:filter 2:all, screen, minw=1024, maxw=16384, maxh=16384)
 ##  returns array of: sdl_idx, screen, current_width, current_height, current_refresh, max_width, max_height, max_refresh
 ##  C# typefinition at the end of the script gets pre-compiled once here rather than let powershell do it slowly every launch
-$library1 = "SetRes"; $version1 = "2025.4.14.0"; $about1 = "match game and desktop res"; $path1 = "$GAMEROOT\$library1.dll"
+$library1 = "SetRes"; $version1 = "2025.4.15.0"; $about1 = "match game and desktop res"; $path1 = "$GAMEROOT\$library1.dll"
 if ((gi $path1 -force -ea 0).VersionInfo.FileVersion -ne $version1) { del $path1 -force -ea 0 } ; if (-not (test-path $path1)) {
   mkdir "$GAMEROOT" -ea 0 >'' 2>''; pushd $GAMEROOT; " one-time initialization of $library1 library..."
   set-content "$GAMEROOT\$library1.cs" $(($MyInvocation.MyCommand.Definition -split '<#[:]LIBRARY1[:].*')[1])
@@ -270,7 +283,7 @@ if ((gi $path1 -force -ea 0).VersionInfo.FileVersion -ne $version1) { del $path1
   $csc = (dir $framework -filter "csc.exe" -Recurse |where {$_.PSPath -like "*v${clr}.*"}).FullName
   start $csc -args "/out:$library1.dll /target:library /platform:anycpu /optimize /nologo $library1.cs" -nonew -wait; popd
 }
-try {Import-Module $path1} catch {del $path1 -force -ea 0; " ERROR importing $library1, run script again! "; timeout -1; return}
+try {Import-Module $path1} catch {del $path1 -force -ea 0; " ERROR importing $library1, run script again! "; sleep 7; return}
 
 ##  should call Init() first
 $display = [AveYo.SetRes]::Init($screen)
@@ -327,18 +340,18 @@ $video["setting.aspectratiomode"]              = $ar
 
 ##  update cfg files with the overrides
 $file = "$CFG_VIDEO_FILE"
-if (-not (test-path $file)) { sc-nonew $file "`"video.cfg`"`n{`n`t`"Version`"`t`t`"13`"`n}`n" }
+if (!(test-path $file)) { sc-nonew $file "${\"}video.cfg${\"}${\n}{${\n}${\t}${\"}Version${\"}${\t}${\t}${\"}13${\"}${\n}}${\n}" }
 $vdf = vdf_parse (gc $file -force); $cfg = $vdf["video.cfg"]
-foreach ($k in $video.Keys) { $cfg[$k] = "`"$($video.$k)`"" }
+foreach ($k in $video.Keys) { $cfg[$k] = "${\"}$($video.$k)${\"}" }
 sc-nonew $file (vdf_print $vdf)
 
 $file = "$GAME\cfg\launcher.cfg"; $cfg = new-object System.Text.StringBuilder
-foreach ($k in $convars.Keys) { [void]$cfg.AppendLine("`"$k`" `"$($convars.$k)`"") }
+foreach ($k in $convars.Keys) { [void]$cfg.AppendLine("${\"}$k${\"} ${\"}$($convars.$k)${\"}") }
 set-content $file $cfg.ToString() -force -ea 0
 
 $file = "$GAME\cfg\autoexec.cfg"; $add = "execifexists launcher // $APPNAME_Launcher convars"
 if (-not (test-path $file)) { [io.file]::writealltext($file, $add) }
-else { $cfg = [io.file]::readalltext($file); if ($cfg -notmatch $add) { [io.file]::writealltext($file, "$add`r`n" + $cfg) } }
+else { $cfg = [io.file]::readalltext($file); if ($cfg -notmatch $add) { [io.file]::writealltext($file, "$add${\r}${\n}$cfg") } }
 
 ##  apply video launch options if different - must shutdown steam for it
 $file = "$USRCLOUD\config\localconfig.vdf"; $vdf = vdf_parse (gc $file -force); $write = $false
@@ -355,31 +368,34 @@ if ($lo -ne '') {
       ($lo_w -and $lo_w -ne $width) -or ($lo_h -and $lo_h -ne $height) -or ($lo_r -and $lo_r -ne $refresh)) { $write = $true } 
 }
 $lo = ("$video_mode $extra_launch_options " + $lo) -replace '\s+',' '
-$vdf["UserLocalConfigStore"]["Software"]["Valve"]["Steam"]["Apps"]["$APPID"]["LaunchOptions"] = "`"$lo`""
+$vdf["UserLocalConfigStore"]["Software"]["Valve"]["Steam"]["Apps"]["$APPID"]["LaunchOptions"] = "${\"}$lo${\"}"
 if ($write) {
   if ((gp "HKCU:\Software\Valve\Steam\ActiveProcess" -ea 0).ActiveUser -gt 0) {
     start "$STEAM\Steam.exe" -args "+app_stop $APPID +app_mark_validation $APPID 0 -shutdown" -wait; sleep 5
-    kill -name "$APPNAME","steam","steamwebhelper" -force -ea 0; del "$STEAM\.crash" -force -ea 0
+    kill -name "$APPNAME","steam","steamwebhelper" -force -ea 0; del "$STEAM\.crash" -force -ea 0; $REOPEN = $true
   }
   sc-nonew $file (vdf_print $vdf)
 }
 
+##  backup current mode
+[Environment]::SetEnvironmentVariable("SetResBack", "$sdl_idx,$screen,$restore_width,$restore_height,$restore_refresh", 1)
+
 ##  add scriptname entries to Steam library --------------------------------------------------------------------------------------
 $file = "$USRCLOUD\config\shortcuts.vdf"; $bvdf = [io.file]::readalltext($file); $next = ($bvdf -split "AppName").count - 1
-$icon = "$GAMEROOT\bin\win64\$APPNAME.exe"; $conhost = "$env:systemroot\sysnative\conhost.exe"
+$icon = "$GAMEROOT\bin\win64\$APPNAME.exe"; $batch = "$env:systemroot\system32\cmd.exe"
 $0 = [char]0; $1 = [char]1; $2 = [char]2; $8 = [char]8
 foreach ($start in "-auto","-manual") {
   $geid = [Text.Encoding]::GetEncoding(28591).GetString([BitConverter]::GetBytes([AveYo.SetRes]::GenAppId("$scriptname $start")))
   $text = ($0 + "$next++$0") + ($2 + "appid$0" + "$geid") + ($1 + "AppName$0" + "$scriptname $start$0") +
-   ($1 + "Exe$0" + "$conhost$0") + ($1 + "StartDir$0" + $0) + ($1 + "icon$0" + "$icon$0") + ($1 + "ShortcutPath$0" + $0) +
-   ($1 + "LaunchOptions$0" + "`"$GAMEROOT\$scriptname.bat`" $start$0") + ($2 + "IsHidden$0" + "$0$0$0$0") + 
+   ($1 + "Exe$0" + "$batch$0") + ($1 + "StartDir$0" + $0) + ($1 + "icon$0" + "$icon$0") + ($1 + "ShortcutPath$0" + $0) +
+   ($1 + "LaunchOptions$0" + "/c ${\"}$GAMEROOT\$scriptname.bat${\"} $start$0") + ($2 + "IsHidden$0" + "$0$0$0$0") + 
    ($2 + "AllowDesktopConfig$0" + "$0$0$0$0") + ($2 + "AllowOverlay$0" + "$0$0$0$0") + ($2 + "OpenVR$0" + "$0$0$0$0") +
    ($2 + "Devkit$0" + "$0$0$0$0") + ($1 + "DevkitGameID$0" + $0) + ($2 + "DevkitOverrideAppID$0" + "$0$0$0$0") +
    ($2 + "LastPlayTime$0" + "$0$0$0$0") + ($1 + "FlatpakAppID$0" + $0) + ($0 + "tags$0") + ($1 + "0$0" + "AveYo$0") + "$8$8$8$8"
   if ($add_to_library -gt 0 -and $bvdf -notmatch "$scriptname -") {
     if ((gp "HKCU:\Software\Valve\Steam\ActiveProcess" -ea 0).ActiveUser -gt 0) {
       start "$STEAM\Steam.exe" -args "+app_stop $APPID -shutdown" -wait; sleep 5
-      kill -name "$APPNAME","steam","steamwebhelper" -force -ea 0; del "$STEAM\.crash" -force -ea 0
+      kill -name "$APPNAME","steam","steamwebhelper" -force -ea 0; del "$STEAM\.crash" -force -ea 0; $REOPEN = $true
     }
     $link = ([io.file]::readallbytes($file) | select -skiplast 2) + [Text.Encoding]::GetEncoding(28591).GetBytes($text)
     [io.file]::writeallbytes($file, $link)
@@ -397,38 +413,41 @@ if ($enable_fso -eq 0 -and (!$found -or !$valid)) {
 }
 if ($enable_fso -eq 1 -and $valid) {rp $flags $progr -force -ea 0}
 
-##  backup current mode ----------------------------------------------------------------------------------------------------------
-[Environment]::SetEnvironmentVariable("SetResBack", "$sdl_idx,$screen,$restore_width,$restore_height,$restore_refresh", 1)
+##  prepare steam quick options --------------------------------------------------------------------------------------------------
+$nojoy     = ('','-nojoy ')[$use_opt_nojoy -eq 1] 
+$quick     = '-silent -quicklogin -vgui -oldtraymenu -nofriendsui -no-dwrite ' + $nojoy + 
+             '-vrdisable -forceservice -console -cef-force-browser-underlay -cef-delaypageload -cef-force-occlusion ' +
+             '-cef-single-process -cef-in-process-gpu -cef-disable-gpu-compositing -cef-disable-gpu' 
+$applaunch = "$quick -applaunch $APPID"
 
-##  prepare steam quick options
-$nojoy = ('','-nojoy ')[$use_opt_nojoy -eq 1] 
-$quick = '-silent -quicklogin -vgui -oldtraymenu -nofriendsui -no-dwrite ' + $nojoy + 
-         '-vrdisable -forceservice -console -cef-force-browser-underlay -cef-delaypageload -cef-force-occlusion ' +
-         '-cef-single-process -cef-in-process-gpu -cef-disable-gpu-compositing -cef-disable-gpu' 
-$steam_options = "$quick -applaunch $APPID"
-
-##  here you can insert anything to run before starting the game like start "some\program" -args "etc";
-
-##  start game (and steam if not already running) or wait for manual / external launcher
 if ($auto_start -ge 1) {
-  write-host "`n waiting Steam to start $WINDOWTITLE ..." -fore Yellow
-  ni "HKCU:\Software\Classes\.steam_$APPNAME\shell\open\command" -force >''
-  sp "HKCU:\Software\Classes\.steam_$APPNAME\shell\open\command" "(Default)" "`"$STEAM\steam.exe`" $steam_options"
-  if (!(test-path "$STEAM\.steam_$APPNAME")) { set-content "$STEAM\.steam_$APPNAME" "" }
-  start explorer -args "`"$STEAM\.steam_$APPNAME`""
+  write-host "${\n} waiting Steam to start $WINDOWTITLE ..." -fore Yellow
 } else {
-  write-host "`n waiting manual / external launcher of $WINDOWTITLE ..." -fore Yellow
+  write-host "${\n} waiting manual / external launcher of $WINDOWTITLE ..." -fore Yellow
 }
 
-##  minimize script window
-sleep 3; powershell -win 2 -nop -c ';' 
+## start steam via explorer only if it was closed by the script previously
+if ($auto_start -le 0 -and $REOPEN -eq $true) {
+  $arg = "HKCU\Software\Classes\.steam_min\shell\open\command${\r}${\n}  = ${\"}${\"}$STEAM\steam.exe${\"} $quick${\"}"  
+  $min = "$STEAM\.steam_min"; sc-nonew $min $arg; regini -i 2 $min; start explorer -args "${\"}$min${\"}"
+}
+
+if ($do_not_minimize_window_while_waiting -le 0) {
+  sleep 5; powershell -win 1 -nop -c ';'
+} 
+
+##  start game (and steam via explorer if not already running) or wait for manual / external launcher
+if ($auto_start -ge 1) {
+  $arg = "HKCU\Software\Classes\.steam_${APPNAME}\shell\open\command${\r}${\n}  = ${\"}${\"}$STEAM\steam.exe${\"} $applaunch${\"}"  
+  $min = "$STEAM\.steam_$APPNAME"; sc-nonew $min $arg; regini -i 2 $min; start explorer -args "${\"}$min${\"}"
+}
 
 ##  while the game has focus, adjust desktop resolution to match it, then restore it on alt-tab ----------------------------------
-[AveYo.SetRes]::Focus(0, $WINDOWTITLE, $CFG_VIDEO_FILE, $RUNNING, $screen, $restore_width, $restore_height, $restore_refresh)
+if ($do_not_set_desktop_res_to_match_game -le 0) {
+  [AveYo.SetRes]::Focus(0, $WINDOWTITLE, $CFG_VIDEO_FILE, $RUNNING, $screen, $restore_width, $restore_height, $restore_refresh)
+}
 
-##  here you can insert anything to run after game is closed like start "some\program" -args "etc";
-
-## log net quality at Desktop\APPNAME_console.log
+## log net quality at Desktop\APPNAME_console.log --------------------------------------------------------------------------------
 if ($extra_launch_options -match '-consolelog' -and (test-path "$GAME\console.log")) {  
   copy "$GAME\console.log" "$([Environment]::GetFolderPath('Desktop'))\${APPNAME}_console.log" -force -ea 0
   $chn = '\[STARTUP\]|\[Client\]|\[SteamNetSockets\]|\[NetSteamConn\]|\[Networking\]|\[BuildSparseShadowTree\]'
@@ -437,10 +456,10 @@ if ($extra_launch_options -match '-consolelog' -and (test-path "$GAME\console.lo
    '|CloseSteamNetConnection|Disassociating NetChan|Removing Steam Net|NetChan Setting Timeout|CSparseShadow' +
    '|Created poll|pipe\] connected|Closing ''| entity|compatability|on panel| connected[\r\n]'
   $log = out-string -i (gc -lit "$([Environment]::GetFolderPath('Desktop'))\${APPNAME}_console.log")
-  $log = $log -replace "(?s)(\d\d\/\d\d \d\d\:\d\d:\d\d\s\[[a-zA-Z ]+\])","`f`$1"
-  $log = $log -split "`f" -replace '(\d\d\/\d\d \d\d\:\d\d:\d\d\s)([^\[])','$2'
+  $log = $log -replace "(?s)(\d\d\/\d\d \d\d\:\d\d:\d\d\s\[[a-zA-Z ]+\])","${\f}${\$}1"
+  $log = $log -split "${\f}" -replace '(\d\d\/\d\d \d\d\:\d\d:\d\d\s)([^\[])','$2'
   $log | foreach {
-    if ($_ -match $chn -and $_ -notmatch $flt) {$_ -replace "[\r\n]+","`r`n"}
+    if ($_ -match $chn -and $_ -notmatch $flt) {$_ -replace "[\r\n]+","${\r}${\n}"}
   } | set-content -nonew -lit "$([Environment]::GetFolderPath('Desktop'))\${APPNAME}_console.log" -force
   write-host -fore green " AveYo: ${APPNAME}_console.log filtered on the Desktop "
 }
@@ -453,7 +472,7 @@ if ($extra_launch_options -match '-consolelog' -and (test-path "$GAME\console.lo
 using System; using System.Collections.Generic; using System.Text; using System.Text.RegularExpressions; using System.Linq;
 using System.IO; using System.Threading; using System.ComponentModel; using System.Diagnostics; using System.Management;
 using System.Runtime.InteropServices; using System.Reflection;
-[assembly:AssemblyVersion("2025.4.14.0")] [assembly: AssemblyTitle("AveYo")]
+[assembly:AssemblyVersion("2025.4.15.0")] [assembly: AssemblyTitle("AveYo")]
 namespace AveYo {
   public static class SetRes
   {
@@ -539,7 +558,7 @@ namespace AveYo {
         _running = (int)Microsoft.Win32.Registry.GetValue(reg_query, reg_val, 0);
         if (!_started && _running == 1)
           _started = true;
-        if (_started && _running == 0) {
+        if ((_started && _running == 0) || _running > 1) {
           _started = false;
           _cancelt.Cancel();
         }
@@ -1371,4 +1390,4 @@ namespace AveYo {
   }
 }
 <#:LIBRARY1: end -------------------------------------------------------------------------------------------------------------- #>
-};$_press_Enter_if_pasted_in_powershell
+$_press_Enter_if_pasted_in_powershell
