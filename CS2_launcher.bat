@@ -1037,7 +1037,7 @@ namespace AveYo {
                     uint idThread, BookFlags dwFlags);
 
     [DllImport("user32", CharSet = CharSet.Auto, SetLastError = true)] public static extern bool
-    UnHookWinEvent(IntPtr hWinEventBook);
+    UnhookWinEvent(IntPtr hWinEventBook);
   }
 
   internal sealed class WinEventBookArgs : EventArgs
