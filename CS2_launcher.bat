@@ -1,7 +1,7 @@
 @(set "0=%~f0" '& set "2=%CD%" & set 1=%*) & powershell -nop -c .([scriptblock]::Create((gc -lit $env:0 -raw))) & exit /b ');.{
 
 <#
-  Counter-Strike 2 launcher - AveYo, 2025.04.17 - now working with FACEIT
+  Counter-Strike 2 launcher - AveYo, 2025.04.18 - now working with FACEIT
   sets desktop resolution to match the game while in focus, then quickly restores native on alt-tab
   this alleviates most alt-tab and secondary screen issues, crashes on startup and high input lag
   + only switches res on alt-tab or task manager, ignoring windows on other screens, winkey or winkey + D
@@ -99,7 +99,7 @@ $scriptname  = "CS2_Launcher"
 $scriptdate  =  20250416
 
 ##  detect STEAM
-$STEAM = resolve-path (gp "HKCU:\SOFTWARE\Valve\Steam").SteamPath; $REOPEN = $false
+$STEAM = resolve-path (gp "HKCU:\SOFTWARE\Valve\Steam").SteamPath; $REOPEN = 0
 if (-not (test-path "$STEAM\steam.exe") -or -not (test-path "$STEAM\steamapps\libraryfolders.vdf")) {
   write-host " Steam not found! " -fore Black -back Yellow; sleep 7; return
 }
@@ -107,7 +107,7 @@ if (-not (test-path "$STEAM\steam.exe") -or -not (test-path "$STEAM\steamapps\li
 ##  AveYo: lean and mean helper functions to process steam vdf files -------------------------------------------------------------
 function vdf_parse {
   param([string[]]$vdf, [ref]$line = ([ref]0), [string]$re = '\A\s*("(?<k>[^"]+)"|(?<b>[\{\}]))\s*(?<v>"(?:\\"|[^"])*")?\Z')
-  $obj = new-object System.Collections.Specialized.OrderedDictionary # ps 3.0: [ordered]@{}
+  $obj = [ordered]@{}
   while ($line.Value -lt $vdf.count) {
     if ($vdf[$line.Value] -match $re) {
       if ($matches.k) { $key = $matches.k }
@@ -136,7 +136,7 @@ function vdf_print {
 }
 function vdf_mkdir {
   param($vdf, [string]$path = ''); $s = $path.split('\',2); $key = $s[0]; $recurse = $s[1]
-  if ($vdf.Keys -notcontains $key) { $vdf.$key = new-object System.Collections.Specialized.OrderedDictionary }
+  if ($key -and $vdf.Keys -notcontains $key) { $vdf.$key = [ordered]@{} }
   if ($recurse) { vdf_mkdir $vdf[$key] $recurse }
 }
 function reload_escape_chars {
@@ -236,7 +236,7 @@ $file = "$CFG_VIDEO"; if (test-path $file) {
 ##  parse game launch options
 $file = "$USRCLOUD\config\localconfig.vdf"; $vdf = vdf_parse (gc $file -force)
 vdf_mkdir $vdf "UserLocalConfigStore\Software\Valve\Steam\Apps\$APPID"
-$lo = $($vdf["UserLocalConfigStore"]["Software"]["Valve"]["Steam"]["Apps"]["$APPID"]["LaunchOptions"]).Trim('"')
+$lo = $($vdf["UserLocalConfigStore"]["Software"]["Valve"]["Steam"]["Apps"]["$APPID"]["LaunchOptions"]+'').Trim(' "')
 if ($lo -ne '') {
   if ($lo -match '-fullscreen\s?')            { $exclusive = 1 }
   if ($lo -match '-sdl_displayindex\s+(\d+)') { $screen    = [int]$matches[1] }
@@ -332,7 +332,7 @@ $vdf = vdf_parse (gc $file -force); $cfg = $vdf["video.cfg"]
 foreach ($k in $video.Keys) { $cfg[$k] = "$_q$($video.$k)$_q" }
 set-content $file (vdf_print $vdf) -nonewline
 
-$file = "$GAME\cfg\launcher.cfg"; $cfg = new-object System.Text.StringBuilder
+$file = "$GAME\cfg\launcher.cfg"; $cfg = [System.Text.StringBuilder]''
 foreach ($k in $convars.Keys) { [void]$cfg.AppendLine("$_q$k$_q $_q$($convars.$k)$_q") }
 set-content $file $cfg.ToString() -force -ea 0
 
@@ -343,15 +343,15 @@ else { $cfg = [io.file]::readalltext($file); if ($cfg -notmatch $add) { [io.file
 ##  remove vid-related launch options already overriden in cfg file above
 $file = "$USRCLOUD\config\localconfig.vdf"; $vdf = vdf_parse (gc $file -force); $write = $false
 vdf_mkdir $vdf "UserLocalConfigStore\Software\Valve\Steam\Apps\$APPID"
-$lo = ($vdf["UserLocalConfigStore"]["Software"]["Valve"]["Steam"]["Apps"]["$APPID"]["LaunchOptions"]).Trim('" ')
+$lo = $($vdf["UserLocalConfigStore"]["Software"]["Valve"]["Steam"]["Apps"]["$APPID"]["LaunchOptions"]+'').Trim(' "')
 if ($rem_vid_options -ge 1 -and $lo -ne '') {
-  $lo_f = !1,''; $lo_c = !1,''; $lo_s = !1,''; $lo_w = !1,''; $lo_h = !1,''; $lo_r = !1,'' 
-  $o = '-w(idth)?\s+?(\d+)?\s?';         if ($lo -match $o) { $lo_w = !0,$matches[2]; $lo = $lo -replace $o }
-  $o = '-h(eight)?\s+?(\d+)?\s?';        if ($lo -match $o) { $lo_h = !0,$matches[2]; $lo = $lo -replace $o }
-  $o = '-r(efresh)?\s+?([\d.]+)?\s?';    if ($lo -match $o) { $lo_r = !0,$matches[2]; $lo = $lo -replace $o }
-  $o = '-sdl_displayindex\s+?(\d+)?\s?'; if ($lo -match $o) { $lo_s = !0,$matches[1]; $lo = $lo -replace $o }
-  $o = '-fullscreen\s?';                 if ($lo -match $o) { $lo_f = !0,1; $lo = $lo -replace $o }
-  $o = '-coop_fullscreen\s?';            if ($lo -match $o) { $lo_c = !0,1; $lo = $lo -replace $o }
+  $lo_f = $false,''; $lo_c = $false,''; $lo_s = $false,''; $lo_w = $false,''; $lo_h = $false,''; $lo_r = $false,'' 
+  $o = '-w(idth)?\s+?(\d+)?\s?';         if ($lo -match $o) { $lo_w = $true,$matches[2]; $lo = $lo -replace $o }
+  $o = '-h(eight)?\s+?(\d+)?\s?';        if ($lo -match $o) { $lo_h = $true,$matches[2]; $lo = $lo -replace $o }
+  $o = '-r(efresh)?\s+?([\d.]+)?\s?';    if ($lo -match $o) { $lo_r = $true,$matches[2]; $lo = $lo -replace $o }
+  $o = '-sdl_displayindex\s+?(\d+)?\s?'; if ($lo -match $o) { $lo_s = $true,$matches[1]; $lo = $lo -replace $o }
+  $o = '-fullscreen\s?';                 if ($lo -match $o) { $lo_f = $true,1; $lo = $lo -replace $o }
+  $o = '-coop_fullscreen\s?';            if ($lo -match $o) { $lo_c = $true,1; $lo = $lo -replace $o }
   if (($lo_w[0] -and $lo_w[1] -ne $width) -or ($lo_h[0] -and $lo_h[1] -ne $height) -or ($lo_r[0] -and $lo_r[1] -ne $refresh) -or
       ($lo_s[0] -and $lo_s[1] -ne $sdl_idx) -or ($lo_f[0] -and $exclusive -ne 1)) { $write = $true } 
   $lo = $lo -replace '\s+',' '
@@ -359,7 +359,7 @@ if ($rem_vid_options -ge 1 -and $lo -ne '') {
 if ($write) {
   if ((gp "HKCU:\Software\Valve\Steam\ActiveProcess" -ea 0).ActiveUser -gt 0) {
     start "$STEAM\Steam.exe" -args "+app_stop $APPID +app_mark_validation $APPID 0 -shutdown" -wait; sleep 5
-    del "$STEAM\.crash" -force -ea 0; $REOPEN = $true
+    del "$STEAM\.crash" -force -ea 0; $REOPEN = 1
   }
   $vdf["UserLocalConfigStore"]["Software"]["Valve"]["Steam"]["Apps"]["$APPID"]["LaunchOptions"] = "$_q$lo$_q"
   set-content $file (vdf_print $vdf) -nonewline
@@ -369,23 +369,27 @@ if ($write) {
 [Environment]::SetEnvironmentVariable("SetResBack", "$sdl_idx,$screen,$restore_width,$restore_height,$restore_refresh", 1)
 
 ##  [optional] add scriptname entries to Steam library ---------------------------------------------------------------------------
-$file = "$USRCLOUD\config\shortcuts.vdf"; $cmd = "$env:systemroot\sysnative\cmd.exe"; $icon = "$GAMEROOT\bin\win64\$APPNAME.exe"
-$bvdf = [io.file]::readalltext($file); $next = ($bvdf -split "AppName").count - 1; reload_escape_chars; $0000 = "$_0$_0$_0$_0"
-foreach ($start in "-auto","-manual") {
-  $geid = [Text.Encoding]::GetEncoding(28591).GetString([BitConverter]::GetBytes([AveYo.SetRes]::GenAppId("$scriptname $start")))
-  $text = $_0 + "$next++$_0" + $_2 + "appid$_0$geid" + $_1 + "AppName$_0$scriptname $start$_0" +
-   $_1 + "Exe$_0$cmd$_0" + $_1 + "StartDir$_0$_0" + $_1 + "icon$_0$icon$_0" + $_1 + "ShortcutPath$_0$_0" +
-   $_1 + "LaunchOptions$_0/c $_q$GAMEROOT\$scriptname.bat$_q $start$_0"     + $_2 + "IsHidden$_0$0000" +
-   $_2 + "AllowDesktopConfig$_0$0000" + $_2 + "AllowOverlay$_0$0000" + $_2 + "OpenVR$_0$0000" +
-   $_2 + "Devkit$_0$0000" + $_1 + "DevkitGameID$_0$_0" +  $_2 + "DevkitOverrideAppID$_0$0000" +
-   $_2 + "LastPlayTime$_0$0000"  +  $_1 + "FlatpakAppID$_0$_0"  +  $_0 + "tags$_0" + $_1 + "0${_0}AveYo$_0" + "$_8$_8$_8$_8"
-  if ($add_to_library -gt 0 -and $bvdf -notmatch "$scriptname -") {
+if ($add_to_library -gt 0) {
+  $file = "$USRCLOUD\config\shortcuts.vdf"; $cmd = "$env:systemroot\sysnative\cmd.exe"; $icon = "$GAMEROOT\bin\win64\$APPNAME.exe"
+  $lat1 = [Text.Encoding]::GetEncoding(28591); reload_escape_chars; $0000 = "$_0$_0$_0$_0"; $empty = "${_0}shortcuts$_0$_8$_8" 
+  if (!(test-path $file) -or (gi $file).Length -lt 15) { [io.file]::writeallbytes($file, $lat1.GetBytes($empty)) }
+  $bvdf = [io.file]::readalltext($file); $next = ($bvdf -split "AppName").count - 1
+  if ($bvdf -notmatch "$scriptname -") {
     if ((gp "HKCU:\Software\Valve\Steam\ActiveProcess" -ea 0).ActiveUser -gt 0) {
       start "$STEAM\Steam.exe" -args "+app_stop $APPID -shutdown" -wait; sleep 5
-      del "$STEAM\.crash" -force -ea 0; $REOPEN = $true
+      del "$STEAM\.crash" -force -ea 0; $REOPEN = 1
     }
-    $link = ([io.file]::readallbytes($file) | select -skiplast 2) + [Text.Encoding]::GetEncoding(28591).GetBytes($text)
-    [io.file]::writeallbytes($file, $link)
+    foreach ($start in "-auto","-manual") {
+      $geid = $lat1.GetString([BitConverter]::GetBytes([AveYo.SetRes]::GenAppId("$scriptname $start")))
+      $text = $_0 + "$($next++)$_0" + $_2 + "appid$_0$geid" + $_1 + "AppName$_0$scriptname $start$_0" +
+        $_1 + "Exe$_0$cmd$_0" + $_1 + "StartDir$_0$_0" + $_1 + "icon$_0$icon$_0" + $_1 + "ShortcutPath$_0$_0" +
+        $_1 + "LaunchOptions$_0/c $_q$GAMEROOT\$scriptname.bat$_q $start$_0"     + $_2 + "IsHidden$_0$0000" +
+        $_2 + "AllowDesktopConfig$_0$0000" + $_2 + "AllowOverlay$_0$0000" + $_2 + "OpenVR$_0$0000" +
+        $_2 + "Devkit$_0$0000" + $_1 + "DevkitGameID$_0$_0" +  $_2 + "DevkitOverrideAppID$_0$0000" +
+        $_2 + "LastPlayTime$_0$0000"  +  $_1 + "FlatpakAppID$_0$_0"  +  $_0 + "tags$_0" + $_1 + "0${_0}AveYo$_0" + "$_8$_8$_8$_8"
+      $link = ([io.file]::readallbytes($file) | select -skiplast 2) + $lat1.GetBytes($text)
+      [io.file]::writeallbytes($file, $link)
+    }
   }
 }
 
@@ -399,7 +403,7 @@ if ($clear_verify -ge 1) {
     if ($write) {
       if ((gp "HKCU:\Software\Valve\Steam\ActiveProcess" -ea 0).ActiveUser -gt 0) {
         start "$STEAM\Steam.exe" -args "+app_stop $APPID +app_mark_validation $APPID 0 -shutdown" -wait; sleep 5
-        del "$STEAM\.crash" -force -ea 0; $REOPEN = $true
+        del "$STEAM\.crash" -force -ea 0; $REOPEN = 1
       }
       set-content $appmanifest (vdf_print $vdf) -nonewline
     }
@@ -424,15 +428,17 @@ $nogpu = ("-cef-in-process-gpu -cef-disable-gpu-compositing -cef-disable-gpu",""
 $QUICK = "-silent -quicklogin -forceservice -console -vgui -oldtraymenu -vrdisable -nofriendsui -no-dwrite $nojoy" +
          "-cef-force-browser-underlay -cef-delaypageload -cef-force-occlusion -cef-single-process $nogpu"
 $AUTO  = "$QUICK -applaunch $APPID $video_mode $extra_launch_options"
-write-host
-write-host " waiting $WINDOWTITLE to match res on desktop then restore native on alt-tab ..." -fore Yellow
 
 ##  reopen steam via explorer if it was closed by this script previously
-if ($auto_start -le 0 -and $REOPEN -eq $true) {
+if ($REOPEN -ge 1) {
   ni "HKCU:\Software\Classes\.steam_min\shell\open\command" -force >''
   sp "HKCU:\Software\Classes\.steam_min\shell\open\command" "(Default)" "$_q$STEAM\steam.exe$_q $QUICK"
   $L = "$STEAM\.steam_min"; if (!(test-path $L)) { set-content $L "" } ; start explorer -args "$_q$L$_q"
+  write-host " reopening steam "
 }
+
+write-host
+write-host " waiting $WINDOWTITLE to match res on desktop then restore native on alt-tab ..." -fore Yellow
 
 if ($do_not_minimize_window_while_waiting -le 0) {
   sleep 5; powershell -win 2 -nop -c ';'
