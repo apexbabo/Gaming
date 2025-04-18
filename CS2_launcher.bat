@@ -11,7 +11,7 @@
   + force specific video settings and cvars at every launch; export game net info to console.log on Desktop
   confirm your game is switching to the proper mode (W I T) via Nvidia Frameview (works on any gpu)
   "How to change the res in-game and still keep it stretched and in low latency mode"
-  switch to fullscreen > select new res > apply > windowed > apply > fullscreen windowed > apply
+  fullscreen > select new res > apply > windowed > apply > open & close task manager > fullscreen windowed > apply
 #>
 
 ##  override resolution: no -1 max 0 |  IF NOT APPEARING IN RES LIST, CREATE THE CUSTOM RES IN GPU DRIVER SETTINGS / CRU
