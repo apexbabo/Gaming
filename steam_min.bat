@@ -13,7 +13,7 @@ $NoGPU         = 1
 $QUICK = "-silent -quicklogin -forceservice -vrdisable -oldtraymenu -nofriendsui -no-dwrite " + ("","-nojoy ")[$NoJoystick -eq 1]
 $QUICK+= ("","-noshaders ")[$NoShaders -eq 1] + ("","-nodirectcomp -cef-disable-gpu -cef-disable-gpu-sandbox ")[$NoGPU -eq 1]
 $QUICK+= "-cef-allow-browser-underlay -cef-delaypageload -cef-force-occlusion -cef-disable-hang-timeouts -console"
-$STEAM = resolve-path (gp "HKCU:\SOFTWARE\Valve\Steam" -ea 0).SteamPath1
+$STEAM = resolve-path (gp "HKCU:\SOFTWARE\Valve\Steam" -ea 0).SteamPath
 
 ## AveYo: abort if steam not found
 if (-not (test-path "$STEAM\steam.exe")) { write-host -fore red " Steam not found! "; return }
