@@ -1,28 +1,32 @@
-@(set "0=%~f0" '& set 1=%*) & powershell -nop -c .([scriptblock]::Create((out-string -i (gc -lit $env:0)))) & exit /b ');.{
-
-" Steam_min : always starts in SmallMode with reduced ram usage when idle - AveYo, 2025.04.17 " 
+@(set "0=%~f0" '& set 1=%*)& powershell -nop -c "$env:2=2; gc -lit $env:0|out-string| powershell -nop -c -"& exit /b ');.{
+                                                                 
+" Steam_min : always restarts in SmallMode with reduced ram and cpu usage when idle - AveYo, 2025.06.10 " 
 
 $FriendsSignIn = 0
+$FriendsAnimed = 0
 $ShowGameIcons = 0
+$NoJoystick    = 1
+$NoShaders     = 1 
+$NoGPU         = 1
 
-$do_not_minimize_window_while_waiting = 0
-$do_not_set_steam_to_disable_gpuaccel = 0
-$do_not_set_steam_to_disable_joystick = 0
-
-##  AveYo: main script section
-$stamp = 20250417
-$nojoy = ("-nojoy "," ")[$do_not_set_steam_to_disable_joystick -ge 1]
-$nogpu = ("-cef-in-process-gpu -cef-disable-gpu-compositing -cef-disable-gpu","")[$do_not_set_steam_to_disable_gpuaccel -ge 1]
-$QUICK = "-silent -quicklogin -forceservice -console -vgui -oldtraymenu -vrdisable -nofriendsui -no-dwrite $nojoy" +
-         "-cef-force-browser-underlay -cef-delaypageload -cef-force-occlusion -cef-single-process $nogpu"
+##  AveYo: steam launch options
+$QUICK = "-silent -quicklogin -forceservice -vrdisable -oldtraymenu -nofriendsui -no-dwrite " + ("","-nojoy ")[$NoJoystick -eq 1]
+$QUICK+= ("","-noshaders ")[$NoShaders -eq 1] + ("","-nodirectcomp -cef-disable-gpu -cef-disable-gpu-sandbox ")[$NoGPU -eq 1]
+$QUICK+= "-cef-allow-browser-underlay -cef-delaypageload -cef-force-occlusion -cef-disable-hang-timeouts -console"
 $STEAM = resolve-path (gp "HKCU:\SOFTWARE\Valve\Steam" -ea 0).SteamPath
 
-##  AveYo: minimize script
-if ($do_not_minimize_window_while_waiting -le 0) {
-  powershell -win 2 -nop -c ';'
-} 
+## AveYo: close steam gracefully if already running
+$focus = $false
+if ((gp "HKCU:\Software\Valve\Steam\ActiveProcess" -ea 0).pid -gt 0) {
+  start "$STEAM\Steam.exe" -args '-ifrunning -silent -shutdown +quit now' -wait; $focus = $true
+}
+## AveYo: force close steam if needed
+while ((gps -name steamwebhelper -ea 0) -or (gps -name steam -ea 0)) {
+  kill -name 'asshole devs','steamwebhelper','steam' -force -ea 0; del "$STEAM\.crash" -force -ea 0; $focus = $true; sleep -m 250  
+}
+if ($focus) { $QUICK+= " -foreground" }
 
-##  AveYo: lean and mean helper functions to process steam vdf files -------------------------------------------------------------
+##  AveYo: lean and mean helper functions to process steam vdf files
 function vdf_parse {
   param([string[]]$vdf, [ref]$line = ([ref]0), [string]$re = '\A\s*("(?<k>[^"]+)"|(?<b>[\{\}]))\s*(?<v>"(?:\\"|[^"])*")?\Z')
   $obj = new-object System.Collections.Specialized.OrderedDictionary # ps 3.0: [ordered]@{}
@@ -38,42 +42,43 @@ function vdf_parse {
   return $obj
 }
 function vdf_print {
-  param($vdf, [ref]$indent = ([ref]0)); reload_escape_chars
+  param($vdf, [ref]$indent = ([ref]0)) 
   if ($vdf -isnot [System.Collections.Specialized.OrderedDictionary]) {return}
   foreach ($key in $vdf.Keys) {
     if ($vdf[$key] -is [System.Collections.Specialized.OrderedDictionary]) {
-      $tabs = "$_t" * $indent.Value
-      write-output "$tabs$_q$key$_q$_n$tabs{$_n"
+      $tabs = "${\t}" * $indent.Value
+      write-output "$tabs""$key""${\n}$tabs{${\n}"
       $indent.Value++; vdf_print -vdf $vdf[$key] -indent $indent; $indent.Value--
-      write-output "$tabs}$_n"
+      write-output "$tabs}${\n}"
     } else {
-      $tabs = "$_t" * $indent.Value
-      write-output "$tabs$_q$key$_q$_t$_t$($vdf[$key])$_n"
+      $tabs = "${\t}" * $indent.Value
+      write-output "$tabs""$key""${\t}${\t}$($vdf[$key])${\n}"
     }
   }
 }
 function vdf_mkdir {
   param($vdf, [string]$path = ''); $s = $path.split('\',2); $key = $s[0]; $recurse = $s[1]
-  if ($vdf.Keys -notcontains $key) { $vdf.$key = new-object System.Collections.Specialized.OrderedDictionary }
+  if ($key -and $vdf.Keys -notcontains $key) { $vdf.$key = new-object System.Collections.Specialized.OrderedDictionary }
   if ($recurse) { vdf_mkdir $vdf[$key] $recurse }
 }
-function reload_escape_chars {
-  $c = @{_t = 9; _n = 10; _f = 12; _r = 13; _q = 34; _s = 36}
-  $c.getenumerator() | foreach { set $_.Name $([char]($_.Value)) -scope 1 -force -ea 0}
+function sc-nonew($fn, $txt) {
+  if ((Get-Command set-content).Parameters['nonewline'] -ne $null) { set-content -lit $fn $txt -nonewline -force }
+  else { [IO.File]::WriteAllText($fn, $txt -join [char]10) } # ps2.0
 }
-function sc-nonew {
-  param($fn,$txt)
-  if ((Get-Command set-content).Parameters['nonewline'] -ne $null) { set-content $fn $txt -nonewline -force }
-  else { $_n = [char]10; [IO.File]::WriteAllText($fn, $txt -join "$_n") } # ps2.0
-}
-reload_escape_chars
+@{'\t'=9; '\n'=10; '\f'=12; '\r'=13; '\"'=34; '\$'=36}.getenumerator() | foreach {set $_.Name $([char]($_.Value)) -force}
 
-##  AveYo: change steam startup location to Library window
+##  AveYo: change steam startup location to Library window and set friendsui perfomance options
 dir "$STEAM\userdata\*\7\remote\sharedconfig.vdf" -Recurse |foreach {
   $file = $_; $write = $false; $vdf = vdf_parse -vdf (gc $file -force)
-  vdf_mkdir $vdf["SteamDefaultDialog"] 'Software\Valve\Steam'
-  $key = $vdf["SteamDefaultDialog"]["Software"]["Valve"]["Steam"]
+  vdf_mkdir $vdf["UserRoamingConfigStore"] 'Software\Valve\Steam\FriendsUI'
+  $key = $vdf["UserRoamingConfigStore"]["Software"]["Valve"]["Steam"]
   if ($key["SteamDefaultDialog"] -ne '"#app_games"') { $key["SteamDefaultDialog"] = '"#app_games"'; $write = $true }
+  $ani = $key["FriendsUI"]["FriendsUIJSON"]
+  if ($FriendsAnimed -eq 0 -and ($ani -like '*atedAvatars\":true*' -or $ani -like '*RoomEffects\":false*') ) {
+    $ani = $ani.Replace('atedAvatars\":true','atedAvatars\":false').Replace('RoomEffects\":false','RoomEffects\":true')
+    $ani = $ani.Replace('PersonaNotifications\":1','PersonaNotifications\":0')
+    $key["FriendsUI"]["FriendsUIJSON"] = $ani; $write = $true
+  }
   if ($write) { sc-nonew $file $(vdf_print $vdf); write-output " $file " }
 }
 
@@ -85,8 +90,8 @@ dir "$STEAM\userdata\*\config\localconfig.vdf" -Recurse |foreach {
   vdf_mkdir $vdf["UserLocalConfigStore"] 'Software\Valve\Steam'
   $key = $vdf["UserLocalConfigStore"]["Software"]["Valve"]["Steam"]
   if ($key["SmallMode"] -ne '"1"') { $key["SmallMode"] = '"1"'; $write = $true }
-  foreach ($o in $opt.Keys) { if ($vdf["UserLocalConfigStore"]["$o"] -ne "$_q$($opt[$o])$_q") {
-    $vdf["UserLocalConfigStore"]["$o"] = "$_q$($opt[$o])$_q"; $write = $true
+  foreach ($o in $opt.Keys) { if ($vdf["UserLocalConfigStore"]["$o"] -ne """$($opt[$o])""") {
+    $vdf["UserLocalConfigStore"]["$o"] = """$($opt[$o])"""; $write = $true
   }}
   if ($FriendsSignIn -eq 0) {
     vdf_mkdir $vdf["UserLocalConfigStore"] 'friends'
@@ -96,40 +101,27 @@ dir "$STEAM\userdata\*\config\localconfig.vdf" -Recurse |foreach {
   if ($write) { sc-nonew $file $(vdf_print $vdf); write-output " $file " }
 }
 
-##  AveYo: add steam_reset.bat
-if (-not (test-path "$STEAM\steam_reset.bat")) { set-content "$STEAM\steam_reset.bat" @'
-@reg delete HKCU\Software\Microsoft\Windows\CurrentVersion\Run /v Steam /f
-@reg delete "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Image File Execution Options\steamwebhelper.exe" /f
-@start "" "%~dp0steam.exe" -silent +quit force 
-@timeout /t 5 /nobreak
-@pushd "%~dp0userdata" & del /f /s /q localconfig.vdf sharedconfig.vdf
-@start "" "%~dp0steam.exe" -silent
-'@ -force
-}
+##  AveYo: save to steam if pasted directly into powershell or location / content does not match
+$file = "$STEAM\steam_min.ps1"
+if ($env:0 -and (test-path -lit $env:0) -and $env:2 -eq 2) {
+  $c0 = gc -lit $env:0 -ea 0; $c2 = gc -lit $file -ea 0
+  if (!(test-path $file) -or (compare-object -Ref $c0 -Diff $c2)) { gc -lit $env:0 | set-content -force $file }  
+} else {
+  ('@(set "0=%~f0" ''& set 1=%*)& powershell -nop -c "$env:2=2; gc -lit $env:0|out-string| powershell -nop -c -"& exit /b '');.{'+
+  $($MyInvocation.MyCommand.Definition) + '} #_press_Enter_if_pasted_in_powershell') -split'\r?\n' | set-content -force $file
+} 
 
-##  AveYo: if pasted directly into powershell or location does not match, save to steam
-$file = "$STEAM\steam_min.bat"
-if ($env:0 -ne $file) {
-  set-content -force $file $(
-    @( '@(set "0=%~f0" ''& set 1=%*) & powershell -nop -' +
-    'c .([scriptblock]::Create((out-string -i (gc -lit $env:0)))) & exit /b '');.{' +
-    $($MyInvocation.MyCommand.Definition) +
-    '} #_press_Enter_if_pasted_in_powershell' ) -split'\r?\n'
-  ) ##  lean and mean hybrid ps 2.0 batch header + footer @ AveYo 2025
-}
+##  AveYo: refresh Steam_min desktop shortcut 
+$wsh = new-object -ComObject WScript.Shell
+$lnk = $wsh.CreateShortcut("$([Environment]::GetFolderPath('Desktop'))\Steam_min.lnk")
+$lnk.Description = "$STEAM\steam.exe"; $lnk.IconLocation = "$STEAM\steam.exe,0"; $lnk.WindowStyle = 7
+$lnk.TargetPath  = "powershell"; $lnk.Arguments = "-nop -nol -ep remotesigned -file ""$STEAM\steam_min.ps1"""; $lnk.Save()
 
-##  AveYo: refresh Steam_min desktop shortcut and startup run if enabled
-$short = "$([Environment]::GetFolderPath('Desktop'))\Steam_min.lnk"
-$s = (new-object -ComObject WScript.Shell).CreateShortcut($short)
-if (-not (test-path $short) -or $s.Arguments -notmatch "$stamp") {
-  $s.Description = "$STEAM\steam.exe"; $s.IconLocation = "$STEAM\steam.exe,0"; $s.WindowStyle = 7 # min
-  $s.TargetPath = "$STEAM\steam_min.bat"; $s.Arguments = "$stamp"; $s.Save()
-}
-$start = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
-if (gp $start Steam -ea 0) { sp $start Steam "$STEAM\steam_min.bat" }
+##  AveYo: start Steam with quick launch options
+[void]$wsh.Run("""$STEAM\Steam.exe"" $QUICK", 1, "false"); sleep -m 250
 
-##  AveYo: start Steam with quick launch options - now under explorer parent
-ni "HKCU:\Software\Classes\.steam_min\shell\open\command" -force >''
-sp "HKCU:\Software\Classes\.steam_min\shell\open\command" "(Default)" "$_q$STEAM\steam.exe$_q $QUICK"
-$L = "$STEAM\.steam_min"; if (!(test-path $L)) { set-content $L "" } ; start explorer -args "$_q$L$_q"
+##  AveYo: cleanup com
+[void][Runtime.InteropServices.Marshal]::ReleaseComObject($lnk)
+[void][Runtime.InteropServices.Marshal]::ReleaseComObject($wsh)
+
 } #_press_Enter_if_pasted_in_powershell
