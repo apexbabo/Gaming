@@ -1,4 +1,4 @@
-@(set "0=%~f0" '& set 1=%*)& powershell -nop -c "$env:2=2; gc -lit $env:0|out-string| powershell -nop -c -"& exit /b ');.{
+@(set "0=%~f0" '& set 1=%*) & powershell -nop -c "$env:2=2; gc -lit $env:0|out-string|powershell -nop -c -" & exit /b ');.{
                                                                  
 " Steam_min : always restarts in SmallMode with reduced ram and cpu usage when idle - AveYo, 2025.06.10 " 
 
@@ -13,7 +13,10 @@ $NoGPU         = 1
 $QUICK = "-silent -quicklogin -forceservice -vrdisable -oldtraymenu -nofriendsui -no-dwrite " + ("","-nojoy ")[$NoJoystick -eq 1]
 $QUICK+= ("","-noshaders ")[$NoShaders -eq 1] + ("","-nodirectcomp -cef-disable-gpu -cef-disable-gpu-sandbox ")[$NoGPU -eq 1]
 $QUICK+= "-cef-allow-browser-underlay -cef-delaypageload -cef-force-occlusion -cef-disable-hang-timeouts -console"
-$STEAM = resolve-path (gp "HKCU:\SOFTWARE\Valve\Steam" -ea 0).SteamPath
+$STEAM = resolve-path (gp "HKCU:\SOFTWARE\Valve\Steam" -ea 0).SteamPath1
+
+## AveYo: abort if steam not found
+if (-not (test-path "$STEAM\steam.exe")) { write-host -fore red " Steam not found! "; return }
 
 ## AveYo: close steam gracefully if already running
 $focus = $false
@@ -106,9 +109,9 @@ $file = "$STEAM\steam_min.ps1"
 if ($env:0 -and (test-path -lit $env:0) -and $env:2 -eq 2) {
   $c0 = gc -lit $env:0 -ea 0; $c2 = gc -lit $file -ea 0
   if (!(test-path $file) -or (compare-object -Ref $c0 -Diff $c2)) { gc -lit $env:0 | set-content -force $file }  
-} else {
-  ('@(set "0=%~f0" ''& set 1=%*)& powershell -nop -c "$env:2=2; gc -lit $env:0|out-string| powershell -nop -c -"& exit /b '');.{'+
-  $($MyInvocation.MyCommand.Definition) + '} #_press_Enter_if_pasted_in_powershell') -split'\r?\n' | set-content -force $file
+} else { ( ##  lean and mean bat-ps1 hybrid - AveYo 2025
+  '@(set "0=%~f0" ''& set 1=%*) & powershell -nop -c "$env:2=2; gc -lit $env:0|out-string|powershell -nop -c -" & exit /b '');.{'+
+   $($MyInvocation.MyCommand.Definition) + '} #_press_Enter_if_pasted_in_powershell' ) -split'\r?\n' | set-content -force $file
 } 
 
 ##  AveYo: refresh Steam_min desktop shortcut 
