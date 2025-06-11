@@ -1,6 +1,6 @@
-@(set "0=%~f0" '& set 1=%*) & powershell -nop -c "$env:2=2; gc -lit $env:0|out-string|powershell -nop -c -" & exit /b ');.{
-                                                                 
-" Steam_min : always restarts in SmallMode with reduced ram and cpu usage when idle - AveYo, 2025.06.10 " 
+@(set "0=%~f0" '& set 1=%*) & powershell -nop -c "$env:2=gc -lit $env:0|out-string; $env:2|powershell -nop -c -" & exit /b ');.{
+
+" Steam_min : always restarts in SmallMode with reduced ram and cpu usage when idle - AveYo, 2025.06.11 " 
 
 $FriendsSignIn = 0
 $FriendsAnimed = 0
@@ -104,14 +104,14 @@ dir "$STEAM\userdata\*\config\localconfig.vdf" -Recurse |foreach {
   if ($write) { sc-nonew $file $(vdf_print $vdf); write-output " $file " }
 }
 
-##  AveYo: save to steam if pasted directly into powershell or location / content does not match
+##  AveYo: save to steam if pasted directly into powershell or content does not match
 $file = "$STEAM\steam_min.ps1"
-if ($env:0 -and (test-path -lit $env:0) -and $env:2 -eq 2) {
-  $c0 = gc -lit $env:0 -ea 0; $c2 = gc -lit $file -ea 0
-  if (!(test-path $file) -or (compare-object -Ref $c0 -Diff $c2)) { gc -lit $env:0 | set-content -force $file }  
-} else { ( ##  lean and mean bat-ps1 hybrid - AveYo 2025
-  '@(set "0=%~f0" ''& set 1=%*) & powershell -nop -c "$env:2=2; gc -lit $env:0|out-string|powershell -nop -c -" & exit /b '');.{'+
-   $($MyInvocation.MyCommand.Definition) + '} #_press_Enter_if_pasted_in_powershell' ) -split'\r?\n' | set-content -force $file
+if ($env:0 -and (test-path -lit $env:0) -and $env:2) {
+  $source = $env:2.Trim([char]13,[char]10) -split '\r?\n'; $output = gc -lit $file -ea 0 
+  if (!(test-path $file) -or (compare-object -Ref $source -Diff $output)) { $source | set-content -force $file }  
+} else {
+  $source = "@(set ""0=%~f0"" '${0=%~f0}');.{$($MyInvocation.MyCommand.Definition)} #_press_Enter_if_pasted_in_powershell"
+  $source -split '\r?\n' | set-content -force $file ##  lean and mean bat-ps1 hybrid - AveYo 2025
 } 
 
 ##  AveYo: refresh Steam_min desktop shortcut 
