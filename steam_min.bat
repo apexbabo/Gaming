@@ -1,6 +1,6 @@
 @(set "0=%~f0" '& set 1=%*) & powershell -nop -c "type -lit $env:0 | out-string | powershell -nop -c -" & exit /b ');.{
 
-" Steam_min : always restarts in SmallMode with reduced ram and cpu usage when idle - AveYo, 2025.06.28 "
+" Steam_min : always restarts in SmallMode with reduced ram and cpu usage when idle - AveYo, 2025.08.23 "
 
 $FriendsSignIn = 0
 $FriendsAnimed = 0
@@ -27,7 +27,7 @@ if ((gp "HKCU:\Software\Valve\Steam\ActiveProcess" -ea 0).pid -gt 0 -and (gps -n
 }
 ## AveYo: force close steam if needed
 while ((gps -name steamwebhelper -ea 0) -or (gps -name steam -ea 0)) {
-  kill -name 'asshole devs','steamwebhelper','steam' -force -ea 0; del "$STEAM\.crash" -force -ea 0; $focus = $true; sleep -m 250
+  kill -name 'steamwebhelper','steam' -force -ea 0; del "$STEAM\.crash" -force -ea 0; $focus = $true; sleep -m 250
 }
 if ($focus) { $QUICK+= " -foreground" }
 
@@ -76,8 +76,8 @@ function sc-nonew($fn, $txt) {
 dir "$STEAM\userdata\*\7\remote\sharedconfig.vdf" -Recurse |foreach {
   $file = $_; $write = $false; $vdf = vdf_parse -vdf (gc $file -force)
   if ($vdf.count -eq 0) { $vdf = vdf_parse @('"UserRoamingConfigStore"','{','}') }
-  vdf_mkdir $vdf[0] 'Software\Valve\Steam\FriendsUI'
-  $key = $vdf[0]["Software"]["Valve"]["Steam"]
+  vdf_mkdir $vdf.Item(0) 'Software\Valve\Steam\FriendsUI'
+  $key = $vdf.Item(0)["Software"]["Valve"]["Steam"]
   if ($key["SteamDefaultDialog"] -ne '"#app_games"') { $key["SteamDefaultDialog"] = '"#app_games"'; $write = $true }
   $ui = $key["FriendsUI"]["FriendsUIJSON"]; if ($ui -notlike '*{*') { $ui = '' }
   if ($FriendsSignIn -eq 0 -and ($ui -like '*bSignIntoFriends\":true*' -or $ui -like '*PersonaNotifications\":1*') ) {
@@ -97,15 +97,14 @@ if ($ShowGameIcons -eq 1) {$opt.LibraryDisplayIconInGameList = 1}
 dir "$STEAM\userdata\*\config\localconfig.vdf" -Recurse |foreach {
   $file = $_; $write = $false; $vdf = vdf_parse -vdf (gc $file -force)
   if ($vdf.count -eq 0) { $vdf = vdf_parse @('"UserLocalConfigStore"','{','}') }
-  vdf_mkdir $vdf[0] 'Software\Valve\Steam'
-  $key = $vdf[0]["Software"]["Valve"]["Steam"]
+  vdf_mkdir $vdf.Item(0) 'Software\Valve\Steam'; vdf_mkdir $vdf.Item(0) 'friends'
+  $key = $vdf.Item(0)["Software"]["Valve"]["Steam"]
   if ($key["SmallMode"] -ne '"1"') { $key["SmallMode"] = '"1"'; $write = $true }
-  foreach ($o in $opt.Keys) { if ($vdf[0]["$o"] -ne """$($opt[$o])""") {
-    $vdf[0]["$o"] = """$($opt[$o])"""; $write = $true
+  foreach ($o in $opt.Keys) { if ($vdf.Item(0)["$o"] -ne """$($opt[$o])""") {
+    $vdf.Item(0)["$o"] = """$($opt[$o])"""; $write = $true
   }}
   if ($FriendsSignIn -eq 0) {
-    vdf_mkdir $vdf[0] 'friends'
-    $key = $vdf[0]["friends"]
+    $key = $vdf.Item(0)["friends"]
     if ($key["SignIntoFriends"] -ne '"0"') { $key["SignIntoFriends"] = '"0"'; $write = $true }
   }
   if ($write) { sc-nonew $file $(vdf_print $vdf); write-output " $file " }
