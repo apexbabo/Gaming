@@ -65,3 +65,6 @@ Reference chart of all radio commands, as they appear in each menu by default:
 |			|	Bombsite A! 						|	go_a			|	#SFUI_Radio_Go_A			|
 |			|	Bombsite B! 						|	go_b			|	#SFUI_Radio_Go_B			|
 |-----------|---------------------------------------|-------------------|-------------------------------|
+
+
+If you want to copy my radio setup, just copy everything in HERE https://pastebin.com/raw/qcRqpVrt , and paste it to your radiopanel.txt file (replacing everything that was there before). 
